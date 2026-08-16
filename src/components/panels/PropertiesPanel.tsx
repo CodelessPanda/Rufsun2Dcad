@@ -4,14 +4,13 @@ import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
 import type { CadObject, RoofObject, SolarPanelObject } from "../../types/cad";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle } from "../../cad/geometry/geometry";
+import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel } from "../../cad/geometry/geometry";
+import { createSolarPanel, nextZ } from "../../cad/objects/factory";
 
 export function PropertiesPanel() {
   const document = useCadStore((state) => state.document);
   const selectedIds = useCadStore((state) => state.selectedIds);
   const activeTool = useCadStore((state) => state.activeTool);
-  const selectedModuleId = useCadStore((state) => state.selectedModuleId);
-  const setSelectedModuleId = useCadStore((state) => state.setSelectedModuleId);
   const updateObject = useCadStore((state) => state.updateObject);
   const addObjects = useCadStore((state) => state.addObjects);
   const setDocument = useCadStore((state) => state.setDocument);
@@ -21,21 +20,9 @@ export function PropertiesPanel() {
 
   return (
     <aside className="properties-panel">
-      {activeTool === "solar" && (
-        <section className="panel-section">
-          <h2>Solar Module</h2>
-          <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
-            {sampleSolarModules.map((module) => (
-              <option key={module.id} value={module.id}>
-                {module.manufacturer} {module.model} · {module.wattage} W · {module.widthMM}×{module.heightMM} mm
-              </option>
-            ))}
-          </select>
-          <p className="fine-print">Generic/sample module data for prototype use.</p>
-        </section>
-      )}
-
       {selectedObjects.length === 0 ? <DocumentSummary /> : selectedObjects.length === 1 ? <SingleObject object={selectedObjects[0]} updateObject={updateObject} addObjects={addObjects} /> : <MultiSelection objects={selectedObjects} />}
+
+      {activeTool === "solar" && <SolarLayoutTools />}
 
       <section className="panel-section">
         <h2>Layers</h2>
@@ -87,14 +74,109 @@ function DocumentSummary() {
   const watts = panels.reduce((sum, panel) => sum + panel.wattage, 0);
   const roofArea = roofs.reduce((sum, roof) => sum + polygonArea(roof.points), 0) / 1_000_000;
   return (
-    <section className="panel-section stats">
+    <section className="panel-section project-overview">
       <h2>Project</h2>
-      <Stat label="Name" value={document.name} />
+      <div className="project-title-card">
+        <strong>{document.customerName || document.name}</strong>
+        <span>{document.customerAddress || "No address added"}</span>
+      </div>
+      <div className="project-metric-grid">
+        <MetricCard label="Modules" value={panels.length} />
+        <MetricCard label="Capacity" value={`${(watts / 1000).toFixed(2)} kWp`} />
+        <MetricCard label="Roofs" value={roofs.length} />
+        <MetricCard label="Roof area" value={`${roofArea.toFixed(1)} m2`} />
+      </div>
+      <Stat label="Project name" value={document.name} />
       <Stat label="Objects" value={document.objects.length} />
-      <Stat label="Solar modules" value={panels.length} />
-      <Stat label="DC capacity" value={`${(watts / 1000).toFixed(2)} kWp`} />
-      <Stat label="Roof areas" value={roofs.length} />
-      <Stat label="Total roof area" value={`${roofArea.toFixed(1)} m2`} />
+    </section>
+  );
+}
+
+function SolarLayoutTools() {
+  const document = useCadStore((state) => state.document);
+  const selectedModuleId = useCadStore((state) => state.selectedModuleId);
+  const setSelectedModuleId = useCadStore((state) => state.setSelectedModuleId);
+  const addObjects = useCadStore((state) => state.addObjects);
+  const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
+  const [rows, setRows] = useState(3);
+  const [columns, setColumns] = useState(6);
+  const [gap, setGap] = useState(120);
+  const [orientation, setOrientation] = useState<SolarPanelObject["orientation"]>("portrait");
+  const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
+  const largestRoof = roofs
+    .slice()
+    .sort((a, b) => polygonArea(b.points) - polygonArea(a.points))[0];
+
+  const addGrid = () => {
+    if (!largestRoof) return;
+    const panels = createPanelsForRoofGrid({
+      roof: largestRoof,
+      module,
+      rows,
+      columns,
+      gap,
+      orientation,
+      zIndexStart: nextZ(document.objects),
+      layerId: preferredSolarLayer(document)
+    });
+    if (panels.length) addObjects(panels, panels.map((panel) => panel.id));
+  };
+
+  const autoFill = () => {
+    const layerId = preferredSolarLayer(document);
+    let zIndex = nextZ(document.objects);
+    const panels = roofs.flatMap((roof) => {
+      const roofPanels = createPanelsForRoofGrid({
+        roof,
+        module,
+        rows: 99,
+        columns: 99,
+        gap,
+        orientation,
+        zIndexStart: zIndex,
+        layerId
+      });
+      zIndex += roofPanels.length;
+      return roofPanels;
+    });
+    if (panels.length) addObjects(panels, panels.map((panel) => panel.id));
+  };
+
+  return (
+    <section className="panel-section solar-layout-tools">
+      <h2>Solar Layout</h2>
+      <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
+        {sampleSolarModules.map((module) => (
+          <option key={module.id} value={module.id}>
+            {module.manufacturer} {module.model} · {module.wattage} W
+          </option>
+        ))}
+      </select>
+      <div className="layout-controls">
+        <NumberField label="Rows" value={rows} onCommit={(value) => setRows(Math.max(1, Math.round(value)))} />
+        <NumberField label="Columns" value={columns} onCommit={(value) => setColumns(Math.max(1, Math.round(value)))} />
+        <NumberField label="Gap" value={gap} suffix="mm" onCommit={(value) => setGap(Math.max(0, value))} />
+        <label className="field">
+          <span>Orientation</span>
+          <select value={orientation} onChange={(event) => setOrientation(event.target.value as SolarPanelObject["orientation"])}>
+            <option value="portrait">Portrait</option>
+            <option value="landscape">Landscape</option>
+          </select>
+        </label>
+      </div>
+      <div className="layout-actions">
+        <button className="primary-action" onClick={addGrid} disabled={!largestRoof}>
+          Create Grid
+        </button>
+        <button className="secondary-action" onClick={autoFill} disabled={roofs.length === 0}>
+          Auto Fill Roof
+        </button>
+      </div>
+      <p className="fine-print">
+        {roofs.length === 0
+          ? "Draw a roof first to place arrays automatically."
+          : "Panels are only added where the full module footprint fits inside the roof."}
+      </p>
     </section>
   );
 }
@@ -128,6 +210,7 @@ function SingleObject({
         </select>
       </label>
       {object.type === "solarPanel" && <SolarProperties object={object} updateObject={updateObject} addObjects={addObjects} />}
+      {object.type === "mapImage" && <MapImageProperties object={object} updateObject={updateObject} />}
       {object.type === "rectangle" && (
         <>
           <NumberField label="Width" value={object.width} suffix="mm" onCommit={(width) => updateObject(object.id, { width: Math.max(20, width) } as Partial<CadObject>)} />
@@ -305,6 +388,27 @@ function Stat({ label, value }: { label: string; value: string | number }) {
   );
 }
 
+function MapImageProperties({ object, updateObject }: { object: Extract<CadObject, { type: "mapImage" }>; updateObject: (id: string, patch: Partial<CadObject>, recordHistory?: boolean) => void }) {
+  return (
+    <>
+      <Stat label="Map width" value={`${(object.width / 1000).toFixed(1)} m`} />
+      <Stat label="Map height" value={`${(object.height / 1000).toFixed(1)} m`} />
+      <Stat label="Zoom" value={object.capture.zoom} />
+      <NumberField label="Opacity" value={Math.round(object.opacity * 100)} suffix="%" onCommit={(opacity) => updateObject(object.id, { opacity: Math.max(0, Math.min(1, opacity / 100)) } as Partial<CadObject>)} />
+      <p className="fine-print">Resize this map layer carefully; the current size is calibrated to real-world meters.</p>
+    </>
+  );
+}
+
+function MetricCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="metric-card">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function labelFor(object: CadObject) {
   const labels: Record<CadObject["type"], string> = {
     line: "Line",
@@ -314,6 +418,7 @@ function labelFor(object: CadObject) {
     text: "Text",
     dimension: "Dimension",
     solarPanel: "Solar Module",
+    mapImage: "Map Layer",
     roof: "Roof"
   };
   return labels[object.type];
@@ -321,4 +426,57 @@ function labelFor(object: CadObject) {
 
 function round(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+function createPanelsForRoofGrid({
+  roof,
+  module,
+  rows,
+  columns,
+  gap,
+  orientation,
+  zIndexStart,
+  layerId
+}: {
+  roof: RoofObject;
+  module: (typeof sampleSolarModules)[number];
+  rows: number;
+  columns: number;
+  gap: number;
+  orientation: SolarPanelObject["orientation"];
+  zIndexStart: number;
+  layerId: string;
+}) {
+  const seed = createSolarPanel({ x: 0, y: 0 }, module, layerId, zIndexStart, orientation);
+  const box = getBoundingBox(roof);
+  const margin = Math.max(0, roof.setback);
+  const startX = box.x + margin;
+  const startY = box.y + margin;
+  const maxX = box.x + box.width - margin - seed.width;
+  const maxY = box.y + box.height - margin - seed.height;
+  const panels: SolarPanelObject[] = [];
+  const rowLimit = Math.min(rows, 120);
+  const columnLimit = Math.min(columns, 120);
+
+  for (let row = 0; row < rowLimit; row += 1) {
+    const y = startY + row * (seed.height + gap);
+    if (y > maxY) break;
+    for (let column = 0; column < columnLimit; column += 1) {
+      const x = startX + column * (seed.width + gap);
+      if (x > maxX) break;
+      const panel = createSolarPanel({ x, y }, module, layerId, zIndexStart + panels.length, orientation);
+      panel.moduleGap = gap;
+      if (roofContainsPanel(panel, [roof])) panels.push(panel);
+    }
+  }
+
+  return panels;
+}
+
+function preferredSolarLayer(document: ReturnType<typeof useCadStore.getState>["document"]) {
+  const solarLayer = document.layers.find((layer) => layer.id === "solar");
+  if (solarLayer?.visible && !solarLayer.locked) return "solar";
+  const activeLayer = document.layers.find((layer) => layer.id === document.settings.activeLayerId);
+  if (activeLayer?.visible && !activeLayer.locked) return activeLayer.id;
+  return document.layers.find((layer) => layer.visible && !layer.locked)?.id ?? "solar";
 }

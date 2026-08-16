@@ -1,7 +1,9 @@
-import { Arrow, Circle, Group, Label, Line, Rect, Tag, Text } from "react-konva";
+import { Arrow, Circle, Group, Image as KonvaImage, Label, Line, Rect, Tag, Text } from "react-konva";
 import type Konva from "konva";
-import type { CadObject, CircleObject, DimensionObject, LineObject, PolygonObject, RectangleObject, RoofObject, TextObject } from "../../../types/cad";
+import { useEffect, useState } from "react";
+import type { CadObject, CircleObject, DimensionObject, LineObject, MapImageObject, PolygonObject, RectangleObject, RoofObject, TextObject } from "../../../types/cad";
 import { distance, formatFeetInches, formatMetric, midpoint, polygonArea } from "../../../cad/geometry/geometry";
+import { googleStaticMapUrl } from "../../../services/googleMaps";
 
 interface SharedProps<T extends CadObject> {
   object: T;
@@ -64,6 +66,53 @@ export function RectangleRenderer(props: SharedProps<RectangleObject>) {
         stroke={selected ? "#f28c28" : object.stroke}
         strokeWidth={(selected ? 5 : 3) / scale}
       />
+    </Group>
+  );
+}
+
+export function MapImageRenderer(props: SharedProps<MapImageObject>) {
+  const { object, selected, scale } = props;
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const apiKey = localStorage.getItem("rufsun.googleMapsApiKey") ?? "";
+    if (!apiKey) {
+      setImage(null);
+      return;
+    }
+    const nextImage = new window.Image();
+    nextImage.crossOrigin = "anonymous";
+    nextImage.onload = () => setImage(nextImage);
+    nextImage.onerror = () => setImage(null);
+    nextImage.src = googleStaticMapUrl(object.capture, apiKey);
+  }, [object.capture]);
+
+  return (
+    <Group {...shared(props)} x={object.x} y={object.y} rotation={object.rotation}>
+      {image ? (
+        <KonvaImage image={image} width={object.width} height={object.height} opacity={object.opacity} />
+      ) : (
+        <Rect width={object.width} height={object.height} fill="#e2e8f0" opacity={0.85} />
+      )}
+      <Rect
+        width={object.width}
+        height={object.height}
+        stroke={selected ? "#f28c28" : "#315b8f"}
+        strokeWidth={(selected ? 5 : 2) / scale}
+        dash={selected ? undefined : [80, 50]}
+        fill="transparent"
+      />
+      {!image && (
+        <Text
+          text="Add Google Maps API key in Settings to render map"
+          x={40}
+          y={40}
+          width={Math.max(240, object.width - 80)}
+          fill="#315b8f"
+          fontSize={140}
+          listening={false}
+        />
+      )}
     </Group>
   );
 }

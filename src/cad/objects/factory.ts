@@ -4,6 +4,8 @@ import type {
   CircleObject,
   DimensionObject,
   LineObject,
+  MapCaptureSettings,
+  MapImageObject,
   Point,
   PolygonObject,
   RectangleObject,
@@ -135,6 +137,24 @@ export function createSolarPanel(
     wattage: module.wattage,
     orientation,
     moduleGap: 20
+  };
+}
+
+export function createMapImage(capture: MapCaptureSettings, zIndex: number): MapImageObject {
+  return {
+    id: uuid(),
+    type: "mapImage",
+    x: 0,
+    y: 0,
+    rotation: 0,
+    layerId: "map",
+    visible: true,
+    locked: false,
+    zIndex,
+    width: capture.widthM * 1000,
+    height: capture.heightM * 1000,
+    opacity: 0.74,
+    capture
   };
 }
 

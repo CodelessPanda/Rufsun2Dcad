@@ -52,6 +52,7 @@ export type CadObjectType =
   | "text"
   | "dimension"
   | "solarPanel"
+  | "mapImage"
   | "roof";
 
 export interface LineObject extends CadObjectBase {
@@ -95,6 +96,25 @@ export interface RoofObject extends CadObjectBase {
   setback: number;
 }
 
+export interface MapCaptureSettings {
+  latitude: number;
+  longitude: number;
+  zoom: number;
+  widthM: number;
+  heightM: number;
+  imageWidthPx: number;
+  imageHeightPx: number;
+  mapType: "satellite" | "roadmap" | "hybrid";
+}
+
+export interface MapImageObject extends CadObjectBase {
+  type: "mapImage";
+  width: number;
+  height: number;
+  opacity: number;
+  capture: MapCaptureSettings;
+}
+
 export interface TextObject extends CadObjectBase {
   type: "text";
   text: string;
@@ -128,6 +148,7 @@ export type CadObject =
   | CircleObject
   | PolygonObject
   | RoofObject
+  | MapImageObject
   | TextObject
   | DimensionObject
   | SolarPanelObject;
@@ -153,6 +174,9 @@ export interface RufsunCadDocument {
   rufsunCadVersion: "0.2";
   version: string;
   name: string;
+  customerName?: string;
+  customerAddress?: string;
+  mapCapture?: MapCaptureSettings;
   units: CadUnits;
   objects: CadObject[];
   layers: CadLayer[];

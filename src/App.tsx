@@ -8,16 +8,25 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { TopBar } from "./components/layout/TopBar";
 import { PropertiesPanel } from "./components/panels/PropertiesPanel";
 import { EnergyAnalysisPanel } from "./components/analysis/EnergyAnalysisPanel";
-import { loadLastProject, saveLastProject } from "./persistence/db";
+import { NewProjectDialog } from "./components/home/NewProjectDialog";
+import { ProjectHome } from "./components/home/ProjectHome";
+import { createProject, deleteProject, listProjects, loadProject, saveProject, type SavedProject } from "./persistence/db";
 import { useCadStore } from "./store/useCadStore";
 import { documentSchema } from "./schemas/documentSchema";
+import type { MapCaptureSettings } from "./types/cad";
 
 export type ViewMode = "editor" | "energy";
 
 export function App() {
   const stageRef = useRef<Konva.Stage>(null);
   const [loaded, setLoaded] = useState(false);
+  const [screen, setScreen] = useState<"home" | "designer">("home");
   const [viewMode, setViewMode] = useState<ViewMode>("editor");
+  const [projects, setProjects] = useState<SavedProject[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  const [projectBusy, setProjectBusy] = useState(false);
+  const [googleMapsApiKey, setGoogleMapsApiKey] = useState(() => localStorage.getItem("rufsun.googleMapsApiKey") ?? "");
   const [panelWidth, setPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("rufsun.panelWidth"));
     return saved >= 280 && saved <= 1600 ? saved : 310;
@@ -72,26 +81,23 @@ export function App() {
   }, [viewMode, setDraft, setGuides]);
 
   useEffect(() => {
-    void loadLastProject()
-      .then((project) => {
-        if (project) {
-          const parsed = documentSchema.safeParse(project);
-          if (parsed.success) setDocument(parsed.data, false);
-        }
-      })
+    void refreshProjects()
       .finally(() => setLoaded(true));
-  }, [setDocument]);
+  }, []);
 
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || screen !== "designer" || !activeProjectId) return;
     setAutosaveStatus("saving");
     const timeout = window.setTimeout(() => {
-      void saveLastProject(document)
-        .then(() => setAutosaveStatus("saved"))
+      void saveProject(activeProjectId, document)
+        .then(() => {
+          setAutosaveStatus("saved");
+          void refreshProjects();
+        })
         .catch(() => setAutosaveStatus("error"));
     }, 500);
     return () => window.clearTimeout(timeout);
-  }, [document, loaded, setAutosaveStatus]);
+  }, [activeProjectId, document, loaded, screen, setAutosaveStatus]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -131,30 +137,108 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [copySelected, deleteSelected, duplicateSelected, paste, redo, undo]);
 
+  const refreshProjects = async () => {
+    setProjects(await listProjects());
+  };
+
+  const openProject = async (id: string) => {
+    const project = await loadProject(id);
+    if (!project) return;
+    const parsed = documentSchema.safeParse(project);
+    if (!parsed.success) {
+      window.alert("Project could not be opened.");
+      return;
+    }
+    setDocument(parsed.data, false);
+    setActiveProjectId(id);
+    setViewMode("editor");
+    setScreen("designer");
+  };
+
+  const removeProject = async (id: string) => {
+    await deleteProject(id);
+    if (activeProjectId === id) {
+      setActiveProjectId(null);
+      setScreen("home");
+      setViewMode("editor");
+    }
+    await refreshProjects();
+  };
+
+  const saveGoogleMapsApiKey = (apiKey: string) => {
+    const trimmed = apiKey.trim();
+    localStorage.setItem("rufsun.googleMapsApiKey", trimmed);
+    setGoogleMapsApiKey(trimmed);
+  };
+
+  const makeProject = async (customerName: string, address: string, mapCapture?: MapCaptureSettings) => {
+    setProjectBusy(true);
+    try {
+      const project = await createProject(customerName, address, mapCapture);
+      setDocument(project.document, false);
+      setActiveProjectId(project.id);
+      setViewMode("editor");
+      setScreen("designer");
+      setNewProjectOpen(false);
+      await refreshProjects();
+    } finally {
+      setProjectBusy(false);
+    }
+  };
+
+  const showProjects = () => {
+    setScreen("home");
+    setViewMode("editor");
+    void refreshProjects();
+  };
+
   return (
     <ErrorBoundary>
-      <div className="app-shell">
-        <TopBar stageRef={stageRef} viewMode={viewMode} setViewMode={setViewMode} />
-        <main className="editor-grid" style={{ "--panel-width": `${panelWidth}px` } as CSSProperties}>
-          {viewMode === "editor" ? (
-            <>
-              <LeftToolbar />
-              <CadCanvas stageRef={stageRef} />
-              <div className="panel-resize-handle" onMouseDown={startResize} />
-              <PropertiesPanel />
-            </>
-          ) : (
-            <>
-              <div className="left-toolbar" />
-              <CadCanvas stageRef={stageRef} readOnly />
-              <div className="panel-resize-handle" onMouseDown={startResize} />
-              <EnergyAnalysisPanel />
-            </>
-          )}
-        </main>
-        {viewMode === "editor" && <StatusBar />}
-        <ContextMenu />
-      </div>
+      {screen === "home" ? (
+        <ProjectHome
+          projects={projects}
+          googleMapsApiKey={googleMapsApiKey}
+          onSaveGoogleMapsApiKey={saveGoogleMapsApiKey}
+          onNewProject={() => setNewProjectOpen(true)}
+          onOpenProject={openProject}
+          onDeleteProject={removeProject}
+        />
+      ) : (
+        <div className="app-shell">
+          <TopBar
+            stageRef={stageRef}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
+            onShowProjects={showProjects}
+          />
+          <main className="editor-grid" style={{ "--panel-width": `${panelWidth}px` } as CSSProperties}>
+            {viewMode === "editor" ? (
+              <>
+                <LeftToolbar />
+                <CadCanvas stageRef={stageRef} />
+                <div className="panel-resize-handle" onMouseDown={startResize} />
+                <PropertiesPanel />
+              </>
+            ) : (
+              <>
+                <div className="left-toolbar" />
+                <CadCanvas stageRef={stageRef} readOnly />
+                <div className="panel-resize-handle" onMouseDown={startResize} />
+                <EnergyAnalysisPanel />
+              </>
+            )}
+          </main>
+          {viewMode === "editor" && <StatusBar />}
+          <ContextMenu />
+        </div>
+      )}
+      <NewProjectDialog
+        open={newProjectOpen}
+        busy={projectBusy}
+        googleMapsApiKey={googleMapsApiKey}
+        onCancel={() => setNewProjectOpen(false)}
+        onCreate={makeProject}
+      />
     </ErrorBoundary>
   );
 }

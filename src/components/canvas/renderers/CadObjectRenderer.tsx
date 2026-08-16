@@ -1,6 +1,6 @@
 import type Konva from "konva";
 import type { CadObject } from "../../../types/cad";
-import { CircleRenderer, DimensionRenderer, LineRenderer, PolygonRenderer, RectangleRenderer, TextRenderer } from "./BasicRenderers";
+import { CircleRenderer, DimensionRenderer, LineRenderer, MapImageRenderer, PolygonRenderer, RectangleRenderer, TextRenderer } from "./BasicRenderers";
 import { SolarPanelRenderer } from "./SolarPanelRenderer";
 
 interface Props {
@@ -34,5 +34,7 @@ export function CadObjectRenderer(props: Props) {
       return <DimensionRenderer {...props} object={props.object} />;
     case "solarPanel":
       return <SolarPanelRenderer {...props} object={props.object} />;
+    case "mapImage":
+      return <MapImageRenderer {...props} object={props.object} />;
   }
 }

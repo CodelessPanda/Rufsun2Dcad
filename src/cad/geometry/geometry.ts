@@ -97,6 +97,7 @@ export function getBoundingBox(object: CadObject): BoundingBox {
       ]);
     case "rectangle":
     case "solarPanel":
+    case "mapImage":
       return rotatedRectBounds(object.x, object.y, object.width, object.height, object.rotation);
     case "circle":
       return {
@@ -247,20 +248,3 @@ export function findContainingRoof(panel: SolarPanelObject, roofs: RoofObject[])
   return roofs.find((roof) => corners.every((corner) => pointInsidePolygon(corner, roof.points)));
 }
 
-/**
- * Interpret a hand-drawn roof outline as a real-world roof so that panels
- * placed on it (which have fixed mm dimensions) always look proportional.
- * Roofs already drawn near real scale (>= half the target length) are left
- * untouched; smaller outlines are scaled up around their center.
- */
-export function normalizeRoofScale(points: Point[], targetLengthMm = 12_000): Point[] {
-  const box = boundsFromPoints(points);
-  const longest = Math.max(box.width, box.height);
-  if (longest < 1 || longest >= targetLengthMm * 0.5) return points;
-  const scale = targetLengthMm / longest;
-  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-  return points.map((point) => ({
-    x: center.x + (point.x - center.x) * scale,
-    y: center.y + (point.y - center.y) * scale
-  }));
-}

@@ -1,11 +1,13 @@
 import { v4 as uuid } from "uuid";
 import type {
   CadLayer,
+  MapCaptureSettings,
   RoofObject,
   RufsunCadDocument
 } from "../../types/cad";
 
 export const defaultLayers: CadLayer[] = [
+  { id: "map", name: "Map", color: "#315b8f", visible: true, locked: false },
   { id: "roof", name: "Roof", color: "#16855f", visible: true, locked: false },
   { id: "solar", name: "Solar", color: "#f28c28", visible: true, locked: false },
   { id: "dimensions", name: "Dimensions", color: "#315b8f", visible: true, locked: false },
@@ -13,14 +15,40 @@ export const defaultLayers: CadLayer[] = [
   { id: "general", name: "General", color: "#334155", visible: true, locked: false }
 ];
 
-export function createBlankDocument(name = "Untitled RufsunCAD Project"): RufsunCadDocument {
+export function createBlankDocument(
+  name = "Untitled RufsunCAD Project",
+  customerName = "",
+  customerAddress = "",
+  mapCapture?: MapCaptureSettings
+): RufsunCadDocument {
   const now = new Date().toISOString();
   return {
     rufsunCadVersion: "0.2",
     version: "0.2",
     name,
+    customerName,
+    customerAddress,
+    mapCapture,
     units: "mm",
-    objects: [],
+    objects: mapCapture
+      ? [
+          {
+            id: uuid(),
+            type: "mapImage",
+            x: 0,
+            y: 0,
+            rotation: 0,
+            layerId: "map",
+            visible: true,
+            locked: false,
+            zIndex: -1000,
+            width: mapCapture.widthM * 1000,
+            height: mapCapture.heightM * 1000,
+            opacity: 0.74,
+            capture: mapCapture
+          }
+        ]
+      : [],
     layers: defaultLayers,
     settings: {
       activeLayerId: "general",

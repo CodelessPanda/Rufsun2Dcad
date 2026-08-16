@@ -72,6 +72,22 @@ const objectSchema = z.discriminatedUnion("type", [
     orientation: z.enum(["portrait", "landscape"]),
     moduleGap: z.number().nonnegative(),
     warning: z.string().optional()
+  }),
+  baseSchema.extend({
+    type: z.literal("mapImage"),
+    width: z.number().positive(),
+    height: z.number().positive(),
+    opacity: z.number().min(0).max(1),
+    capture: z.object({
+      latitude: z.number(),
+      longitude: z.number(),
+      zoom: z.number(),
+      widthM: z.number().positive(),
+      heightM: z.number().positive(),
+      imageWidthPx: z.number().positive(),
+      imageHeightPx: z.number().positive(),
+      mapType: z.enum(["satellite", "roadmap", "hybrid"])
+    })
   })
 ]);
 
@@ -79,6 +95,18 @@ export const documentSchema = z.object({
   rufsunCadVersion: z.literal("0.2"),
   version: z.string(),
   name: z.string(),
+  customerName: z.string().optional(),
+  customerAddress: z.string().optional(),
+  mapCapture: z.object({
+    latitude: z.number(),
+    longitude: z.number(),
+    zoom: z.number(),
+    widthM: z.number().positive(),
+    heightM: z.number().positive(),
+    imageWidthPx: z.number().positive(),
+    imageHeightPx: z.number().positive(),
+    mapType: z.enum(["satellite", "roadmap", "hybrid"])
+  }).optional(),
   units: z.literal("mm"),
   objects: z.array(objectSchema),
   layers: z.array(

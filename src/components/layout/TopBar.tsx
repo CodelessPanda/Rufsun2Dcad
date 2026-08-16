@@ -1,11 +1,10 @@
 import type Konva from "konva";
-import { Download, FileDown, FileInput, FilePlus2, FolderOpen, Redo2, RotateCcw, Save, Undo2, ZoomIn, ZoomOut, TrendingUp, Edit3 } from "lucide-react";
+import { ChevronDown, Download, FileDown, Home, Redo2, RotateCcw, Save, Undo2, ZoomIn, ZoomOut, TrendingUp, Edit3 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ViewMode } from "../../App";
 import { useCadStore } from "../../store/useCadStore";
 import { DEFAULT_SCALE, clampScale, zoomPercent } from "../../cad/viewport/viewport";
-import { documentSchema } from "../../schemas/documentSchema";
 import { selectedSolarStats } from "../../store/useCadStore";
 import type { RoofObject, SolarPanelObject } from "../../types/cad";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
@@ -14,22 +13,21 @@ interface Props {
   stageRef: RefObject<Konva.Stage>;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
+  onShowProjects: () => void;
 }
 
-export function TopBar({ stageRef, viewMode, setViewMode }: Props) {
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Props) {
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const document = useCadStore((state) => state.document);
   const viewport = useCadStore((state) => state.viewport);
   const setViewport = useCadStore((state) => state.setViewport);
-  const setDocument = useCadStore((state) => state.setDocument);
   const setProjectName = useCadStore((state) => state.setProjectName);
-  const newProject = useCadStore((state) => state.newProject);
-  const loadDemo = useCadStore((state) => state.loadDemo);
   const undo = useCadStore((state) => state.undo);
   const redo = useCadStore((state) => state.redo);
   const clearSelection = useCadStore((state) => state.clearSelection);
   const stats = selectedSolarStats(document.objects, document.objects.filter((object) => object.type === "solarPanel").map((object) => object.id));
   const [projectNameDraft, setProjectNameDraft] = useState(document.name);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
   useEffect(() => {
     setProjectNameDraft(document.name);
@@ -44,22 +42,25 @@ export function TopBar({ stageRef, viewMode, setViewMode }: Props) {
     if (trimmed !== document.name) setProjectName(trimmed);
   };
 
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!exportMenuRef.current?.contains(event.target as Node)) setExportMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointerDown);
+    return () => window.removeEventListener("pointerdown", onPointerDown);
+  }, [exportMenuOpen]);
+
   const exportProject = () => {
     const blob = new Blob([JSON.stringify(document, null, 2)], { type: "application/json" });
     downloadBlob(blob, `${document.name.replace(/\s+/g, "-").toLowerCase()}.rufcad`);
   };
 
-  const importProject = async (file: File) => {
-    try {
-      const raw = await file.text();
-      const parsed = documentSchema.parse(JSON.parse(raw));
-      setDocument(parsed);
-    } catch (error) {
-      window.alert(`Project could not be opened: ${error instanceof Error ? error.message : "Invalid RufsunCAD file"}`);
-    } finally {
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+  const runExport = (exporter: () => void) => {
+    setExportMenuOpen(false);
+    exporter();
   };
+
 
   const exportPng = () => {
     clearSelection();
@@ -176,24 +177,30 @@ export function TopBar({ stageRef, viewMode, setViewMode }: Props) {
         }}
       />
       <nav className="menu-strip" aria-label="Project commands">
-        <button onClick={newProject} title="New Project">
-          <FilePlus2 /> New
-        </button>
-        <button onClick={loadDemo} title="Load Demo Project">
-          <FolderOpen /> Demo
-        </button>
-        <button onClick={() => fileInputRef.current?.click()} title="Open RufsunCAD Project">
-          <FileInput /> Open
-        </button>
-        <button onClick={exportProject} title="Export RufsunCAD Project">
-          <Save /> Export
-        </button>
-        <button onClick={exportPng} title="Export PNG">
-          <Download /> PNG
-        </button>
-        <button onClick={exportPdf} title="Export PDF">
-          <FileDown /> PDF
-        </button>
+        <div className="export-menu" ref={exportMenuRef}>
+          <button
+            className="export-trigger"
+            onClick={() => setExportMenuOpen((open) => !open)}
+            title="Export"
+            aria-haspopup="menu"
+            aria-expanded={exportMenuOpen}
+          >
+            <Save /> Export <ChevronDown />
+          </button>
+          {exportMenuOpen && (
+            <div className="export-dropdown" role="menu">
+              <button role="menuitem" onClick={() => runExport(exportProject)}>
+                <Save /> Default (.rufcad)
+              </button>
+              <button role="menuitem" onClick={() => runExport(exportPng)}>
+                <Download /> PNG
+              </button>
+              <button role="menuitem" onClick={() => runExport(exportPdf)}>
+                <FileDown /> PDF
+              </button>
+            </div>
+          )}
+        </div>
       </nav>
       <div className="topbar-spacer" />
       <div className="view-switcher">
@@ -215,34 +222,29 @@ export function TopBar({ stageRef, viewMode, setViewMode }: Props) {
         </button>
       </div>
       <div className="topbar-spacer" />
-      <div className="command-cluster" style={viewMode !== "editor" ? { visibility: "hidden" } : undefined}>
-        <button onClick={undo} title="Undo (Ctrl+Z)">
-          <Undo2 />
+      <div className="command-cluster">
+        <span className="editor-command-set" style={viewMode !== "editor" ? { visibility: "hidden" } : undefined}>
+          <button onClick={undo} title="Undo (Ctrl+Z)">
+            <Undo2 />
+          </button>
+          <button onClick={redo} title="Redo (Ctrl+Shift+Z or Ctrl+Y)">
+            <Redo2 />
+          </button>
+          <button onClick={() => setViewport({ ...viewport, scale: clampScale(viewport.scale * 1.15) })} title="Zoom In">
+            <ZoomIn />
+          </button>
+          <button onClick={() => setViewport({ ...viewport, scale: clampScale(viewport.scale / 1.15) })} title="Zoom Out">
+            <ZoomOut />
+          </button>
+          <button onClick={() => setViewport({ x: 320, y: 120, scale: DEFAULT_SCALE })} title="Reset Zoom">
+            <RotateCcw />
+          </button>
+          <span className="zoom-pill">Zoom {zoomPercent(viewport.scale)}%</span>
+        </span>
+        <button className="designer-projects-btn" onClick={onShowProjects} title="Back to Projects">
+          <Home /> Back to Projects
         </button>
-        <button onClick={redo} title="Redo (Ctrl+Shift+Z or Ctrl+Y)">
-          <Redo2 />
-        </button>
-        <button onClick={() => setViewport({ ...viewport, scale: clampScale(viewport.scale * 1.15) })} title="Zoom In">
-          <ZoomIn />
-        </button>
-        <button onClick={() => setViewport({ ...viewport, scale: clampScale(viewport.scale / 1.15) })} title="Zoom Out">
-          <ZoomOut />
-        </button>
-        <button onClick={() => setViewport({ x: 320, y: 120, scale: DEFAULT_SCALE })} title="Reset Zoom">
-          <RotateCcw />
-        </button>
-        <span className="zoom-pill">Zoom {zoomPercent(viewport.scale)}%</span>
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".rufcad,.json,application/json"
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) void importProject(file);
-        }}
-      />
     </header>
   );
 }
