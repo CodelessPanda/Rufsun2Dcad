@@ -1,11 +1,8 @@
 import { v4 as uuid } from "uuid";
 import type {
   CadLayer,
-  DimensionObject,
   RoofObject,
-  RufsunCadDocument,
-  SolarPanelObject,
-  TextObject
+  RufsunCadDocument
 } from "../../types/cad";
 
 export const defaultLayers: CadLayer[] = [
@@ -19,8 +16,8 @@ export const defaultLayers: CadLayer[] = [
 export function createBlankDocument(name = "Untitled RufsunCAD Project"): RufsunCadDocument {
   const now = new Date().toISOString();
   return {
-    rufsunCadVersion: "0.1",
-    version: "0.1",
+    rufsunCadVersion: "0.2",
+    version: "0.2",
     name,
     units: "mm",
     objects: [],
@@ -76,64 +73,9 @@ export function createDemoDocument(): RufsunCadDocument {
     setback: 500
   };
 
-  const panels: SolarPanelObject[] = [];
-  for (let row = 0; row < 3; row += 1) {
-    for (let column = 0; column < 4; column += 1) {
-      panels.push({
-        id: uuid(),
-        type: "solarPanel",
-        x: 2200 + column * (1134 + 20),
-        y: 1700 + row * (2278 + 20),
-        rotation: 0,
-        layerId: "solar",
-        visible: true,
-        locked: false,
-        zIndex: 10 + row * 4 + column,
-        manufacturer: "Generic",
-        model: "Mono 550",
-        width: 1134,
-        height: 2278,
-        thickness: 35,
-        wattage: 550,
-        orientation: "portrait",
-        moduleGap: 20
-      });
-    }
-  }
-
-  const dimension: DimensionObject = {
-    id: uuid(),
-    type: "dimension",
-    x: 2200,
-    y: 7400,
-    rotation: 0,
-    layerId: "dimensions",
-    visible: true,
-    locked: false,
-    zIndex: 100,
-    start: { x: 2200, y: 7400 },
-    end: { x: 6814, y: 7400 },
-    mode: "horizontal"
-  };
-
-  const label: TextObject = {
-    id: uuid(),
-    type: "text",
-    x: 900,
-    y: 520,
-    rotation: 0,
-    layerId: "annotations",
-    visible: true,
-    locked: false,
-    zIndex: 101,
-    text: "RufsunCAD demo - sample module data",
-    fontSize: 220,
-    color: "#334155"
-  };
-
   return {
     ...document,
-    objects: [roof, ...panels, dimension, label],
+    objects: [roof],
     updatedAt: new Date().toISOString()
   };
 }

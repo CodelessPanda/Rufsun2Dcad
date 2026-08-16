@@ -27,7 +27,7 @@ export function PropertiesPanel() {
           <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
             {sampleSolarModules.map((module) => (
               <option key={module.id} value={module.id}>
-                {module.manufacturer} {module.model} - {module.wattage} W
+                {module.manufacturer} {module.model} · {module.wattage} W · {module.widthMM}×{module.heightMM} mm
               </option>
             ))}
           </select>

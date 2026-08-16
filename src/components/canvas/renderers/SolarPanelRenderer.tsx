@@ -39,6 +39,7 @@ export function SolarPanelRenderer({
       y={object.y}
       rotation={object.rotation}
       draggable={draggable}
+      dragDistance={4}
       onClick={(event) => {
         event.cancelBubble = true;
         onSelect(object.id, event.evt.shiftKey);

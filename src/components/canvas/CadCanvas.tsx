@@ -4,7 +4,7 @@ import type Konva from "konva";
 import { useCadStore } from "../../store/useCadStore";
 import type { CadObject, Point, SolarPanelObject } from "../../types/cad";
 import { clampScale, screenToWorld, zoomAroundPoint } from "../../cad/viewport/viewport";
-import { getBoundingBox, rectanglesOverlap } from "../../cad/geometry/geometry";
+import { getBoundingBox, normalizeRoofScale, rectanglesOverlap } from "../../cad/geometry/geometry";
 import { calculateSnap, snapPanelToPanels, snapToGrid } from "../../cad/snapping/snapping";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import {
@@ -24,9 +24,10 @@ import { CadObjectRenderer } from "./renderers/CadObjectRenderer";
 
 interface Props {
   stageRef: RefObject<Konva.Stage>;
+  readOnly?: boolean;
 }
 
-export function CadCanvas({ stageRef }: Props) {
+export function CadCanvas({ stageRef, readOnly = false }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodesRef = useRef<Record<string, Konva.Node | null>>({});
@@ -113,6 +114,7 @@ export function CadCanvas({ stageRef }: Props) {
         finishPolygonDraft();
         return;
       }
+      if (readOnly) return;
       if (event.ctrlKey || event.metaKey) return;
       const key = event.key.toLowerCase();
       const shortcuts: Record<string, typeof activeTool> = {
@@ -139,7 +141,7 @@ export function CadCanvas({ stageRef }: Props) {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [draft, setDraft, clearSelection, setGuides]);
+  }, [draft, readOnly, setDraft, clearSelection, setGuides]);
 
   const getPointer = (): Point | null => {
     const pointer = stageRef.current?.getPointerPosition();
@@ -170,6 +172,15 @@ export function CadCanvas({ stageRef }: Props) {
 
     if (event.evt.button === 1 || activeTool === "pan" || spaceDownRef.current) {
       panStartRef.current = { pointer, viewport };
+      return;
+    }
+
+    if (readOnly) {
+      if (isStage) {
+        if (!event.evt.shiftKey) clearSelection();
+        marqueeStartRef.current = world;
+        setMarquee({ start: world, current: world });
+      }
       return;
     }
 
@@ -274,7 +285,7 @@ export function CadCanvas({ stageRef }: Props) {
 
   const handleMouseUp = () => {
     if (panStartRef.current) panStartRef.current = null;
-    if (marquee && activeTool === "select") {
+    if (marquee && (activeTool === "select" || readOnly)) {
       const box = marqueeBox(marquee.start, marquee.current);
       const ids = visibleObjects.filter((object) => rectanglesOverlap(getBoundingBox(object), box)).map((object) => object.id);
       if (ids.length) selectMany(ids);
@@ -286,15 +297,16 @@ export function CadCanvas({ stageRef }: Props) {
   const finishPolygonDraft = () => {
     const currentDraft = useCadStore.getState().draft;
     if (!currentDraft || currentDraft.type !== "polygon" || currentDraft.points.length < 3) return;
+    const points = currentDraft.roof ? normalizeRoofScale(currentDraft.points) : currentDraft.points;
     const object = currentDraft.roof
-      ? createRoof(currentDraft.points, nextZ(document.objects))
-      : createPolygon(currentDraft.points, document.settings.activeLayerId, nextZ(document.objects));
+      ? createRoof(points, nextZ(document.objects))
+      : createPolygon(points, document.settings.activeLayerId, nextZ(document.objects));
     addObjects([object], [object.id]);
     setDraft(null);
   };
 
   const handleObjectSelect = (id: string, additive: boolean) => {
-    if (activeTool !== "select") return;
+    if (activeTool !== "select" && !readOnly) return;
     if (additive) toggleSelect(id);
     else selectOnly(id);
   };
@@ -302,6 +314,8 @@ export function CadCanvas({ stageRef }: Props) {
   const handleDragStart = (id: string) => {
     setGuides([]);
     setSnapMarker(undefined);
+    // Selecting + dragging should happen in one gesture: claim the object being dragged
+    if (!selectedIds.includes(id)) selectOnly(id);
     const ids = selectedIds.includes(id) ? selectedIds : [id];
     dragOriginalsRef.current = document.objects.filter((object) => ids.includes(object.id) && canInteractWithObject(object, layersById));
     if (dragOriginalsRef.current.length === 0) {
@@ -387,8 +401,9 @@ export function CadCanvas({ stageRef }: Props) {
     }
   };
 
-  const canvasCursor =
-    activeTool === "pan" || spaceDownRef.current
+  const canvasCursor = readOnly
+    ? "default"
+    : activeTool === "pan" || spaceDownRef.current
       ? "grab"
       : activeTool === "select"
         ? "default"
@@ -433,7 +448,7 @@ export function CadCanvas({ stageRef }: Props) {
                 key={object.id}
                 object={object}
                 selected={selectedIds.includes(object.id)}
-                draggable={activeTool === "select" && selectedIds.includes(object.id) && !locked}
+                draggable={!readOnly && activeTool === "select" && !locked}
                 scale={viewport.scale}
                 registerNode={(id, node) => {
                   nodesRef.current[id] = node;

@@ -76,7 +76,7 @@ const objectSchema = z.discriminatedUnion("type", [
 ]);
 
 export const documentSchema = z.object({
-  rufsunCadVersion: z.literal("0.1"),
+  rufsunCadVersion: z.literal("0.2"),
   version: z.string(),
   name: z.string(),
   units: z.literal("mm"),

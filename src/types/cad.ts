@@ -150,7 +150,7 @@ export interface SnapSettings {
 }
 
 export interface RufsunCadDocument {
-  rufsunCadVersion: "0.1";
+  rufsunCadVersion: "0.2";
   version: string;
   name: string;
   units: CadUnits;

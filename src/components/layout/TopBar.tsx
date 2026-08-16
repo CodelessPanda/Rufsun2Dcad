@@ -1,17 +1,20 @@
 import type Konva from "konva";
-import { Download, FileDown, FileInput, FilePlus2, FolderOpen, Redo2, RotateCcw, Save, Undo2, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, FileDown, FileInput, FilePlus2, FolderOpen, Redo2, RotateCcw, Save, Undo2, ZoomIn, ZoomOut, TrendingUp, Edit3 } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { useRef, type RefObject } from "react";
+import type { ViewMode } from "../../App";
 import { useCadStore } from "../../store/useCadStore";
-import { BASE_SCALE, clampScale, zoomPercent } from "../../cad/viewport/viewport";
+import { DEFAULT_SCALE, clampScale, zoomPercent } from "../../cad/viewport/viewport";
 import { documentSchema } from "../../schemas/documentSchema";
 import { selectedSolarStats } from "../../store/useCadStore";
 
 interface Props {
   stageRef: RefObject<Konva.Stage>;
+  viewMode: ViewMode;
+  setViewMode: (mode: ViewMode) => void;
 }
 
-export function TopBar({ stageRef }: Props) {
+export function TopBar({ stageRef, viewMode, setViewMode }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const document = useCadStore((state) => state.document);
   const viewport = useCadStore((state) => state.viewport);
@@ -92,7 +95,26 @@ export function TopBar({ stageRef }: Props) {
         </button>
       </nav>
       <div className="topbar-spacer" />
-      <div className="command-cluster">
+      <div className="view-switcher">
+        <button
+          className={`view-btn ${viewMode === "editor" ? "active" : ""}`}
+          onClick={() => setViewMode("editor")}
+          title="CAD Editor (E)"
+        >
+          <Edit3 size={18} />
+          Editor
+        </button>
+        <button
+          className={`view-btn ${viewMode === "energy" ? "active" : ""}`}
+          onClick={() => setViewMode("energy")}
+          title="Energy Analysis"
+        >
+          <TrendingUp size={18} />
+          Analysis
+        </button>
+      </div>
+      <div className="topbar-spacer" />
+      <div className="command-cluster" style={viewMode !== "editor" ? { visibility: "hidden" } : undefined}>
         <button onClick={undo} title="Undo (Ctrl+Z)">
           <Undo2 />
         </button>
@@ -105,7 +127,7 @@ export function TopBar({ stageRef }: Props) {
         <button onClick={() => setViewport({ ...viewport, scale: clampScale(viewport.scale / 1.15) })} title="Zoom Out">
           <ZoomOut />
         </button>
-        <button onClick={() => setViewport({ x: 320, y: 120, scale: BASE_SCALE })} title="Reset Zoom">
+        <button onClick={() => setViewport({ x: 320, y: 120, scale: DEFAULT_SCALE })} title="Reset Zoom">
           <RotateCcw />
         </button>
         <span className="zoom-pill">Zoom {zoomPercent(viewport.scale)}%</span>

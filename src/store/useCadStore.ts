@@ -13,7 +13,7 @@ import type {
   Viewport
 } from "../types/cad";
 import { createBlankDocument, createDemoDocument } from "../cad/document/defaultDocument";
-import { BASE_SCALE } from "../cad/viewport/viewport";
+import { DEFAULT_SCALE } from "../cad/viewport/viewport";
 import { calculateArrayStats } from "../cad/array/array";
 import { roofContainsPanel, translateObject } from "../cad/geometry/geometry";
 
@@ -97,7 +97,7 @@ export const useCadStore = create<CadState>((set, get) => ({
   document: initialDocument,
   selectedIds: [],
   activeTool: "select",
-  viewport: { x: 320, y: 120, scale: BASE_SCALE },
+  viewport: { x: 320, y: 120, scale: DEFAULT_SCALE },
   pointerWorld: { x: 0, y: 0 },
   draft: null,
   guides: [],

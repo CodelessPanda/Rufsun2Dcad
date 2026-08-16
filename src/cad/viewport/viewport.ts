@@ -3,6 +3,7 @@ import type { Point, Viewport } from "../../types/cad";
 export const BASE_SCALE = 0.1;
 export const MIN_SCALE = BASE_SCALE * 0.1;
 export const MAX_SCALE = BASE_SCALE * 20;
+export const DEFAULT_SCALE = BASE_SCALE * 0.5;
 
 export function worldToScreen(point: Point, viewport: Viewport): Point {
   return {
