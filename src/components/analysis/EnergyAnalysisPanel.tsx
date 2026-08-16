@@ -3,7 +3,7 @@ import { TrendingUp, Zap, DollarSign, Gauge, Sun, SlidersHorizontal } from "luci
 import { useCadStore } from "../../store/useCadStore";
 import type { RoofObject, SolarPanelObject } from "../../types/cad";
 import type { TimePeriod } from "../../cad/energy/energyCalculator";
-import { calculateAllPeriods, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
+import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
 
 const PERIODS = ["today", "week", "month", "year"] as const;
 
@@ -13,6 +13,7 @@ export function EnergyAnalysisPanel() {
   const [electricityRate, setElectricityRate] = useState(0.12);
   const [averageRadiance, setAverageRadiance] = useState(800);
   const [sunlightHours, setSunlightHours] = useState(6);
+  const [costPerWatt, setCostPerWatt] = useState(2.75);
 
   const allPanels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
@@ -52,6 +53,7 @@ export function EnergyAnalysisPanel() {
   });
 
   const current = results[selectedPeriod];
+  const costEstimate = calculateSystemCostEstimate(current.totalCapacity, results.year.estimatedRevenue, costPerWatt);
 
   return (
     <aside className="properties-panel analysis-panel">
@@ -101,15 +103,22 @@ export function EnergyAnalysisPanel() {
 
       {/* Financial Projection */}
       <section className="panel-section">
-        <h3>Estimated Savings</h3>
-        <div className="revenue-stat">
-          <DollarSign size={20} />
+        <h3>Cost vs Savings</h3>
+        <div className="finance-compare">
           <div>
-            <div className="value">${current.estimatedRevenue}</div>
-            <div className="label">Estimated savings for {selectedPeriod}</div>
-            <div className="fine-print">at ${electricityRate.toFixed(2)}/kWh</div>
+            <DollarSign size={18} />
+            <span>System cost</span>
+            <strong>{formatCurrency(costEstimate.systemCost)}</strong>
+          </div>
+          <div>
+            <TrendingUp size={18} />
+            <span>{selectedPeriod} savings</span>
+            <strong>{formatCurrency(current.estimatedRevenue)}</strong>
           </div>
         </div>
+        <Stat label="Annual Savings" value={formatCurrency(costEstimate.annualSavings)} />
+        <Stat label="Payback Estimate" value={costEstimate.paybackYears === null ? "N/A" : `${costEstimate.paybackYears} years`} />
+        <Stat label="First Year Net" value={formatCurrency(costEstimate.firstYearNet)} />
       </section>
 
       {/* Period Comparison Table */}
@@ -166,6 +175,14 @@ export function EnergyAnalysisPanel() {
           step={0.5}
           onChange={setSunlightHours}
         />
+        <NumberField
+          label="Install cost"
+          value={costPerWatt}
+          suffix="$/W"
+          min={0}
+          step={0.05}
+          onChange={setCostPerWatt}
+        />
       </section>
 
       {/* Notes */}
@@ -181,6 +198,11 @@ export function EnergyAnalysisPanel() {
       </section>
     </aside>
   );
+}
+
+function formatCurrency(value: number) {
+  const rounded = Math.round(value);
+  return `${rounded < 0 ? "-" : ""}$${Math.abs(rounded).toLocaleString()}`;
 }
 
 function Stat({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string | number }) {

@@ -7,6 +7,7 @@ interface SharedProps<T extends CadObject> {
   object: T;
   selected: boolean;
   draggable: boolean;
+  listening: boolean;
   scale: number;
   registerNode: (id: string, node: Konva.Node | null) => void;
   onSelect: (id: string, additive: boolean) => void;
@@ -21,6 +22,7 @@ function shared<T extends CadObject>(props: SharedProps<T>) {
     id: `node-${props.object.id}`,
     ref: (node: Konva.Node | null) => props.registerNode(props.object.id, node),
     draggable: props.draggable,
+    listening: props.listening,
     dragDistance: 4,
     onClick: (event: Konva.KonvaEventObject<MouseEvent>) => {
       event.cancelBubble = true;

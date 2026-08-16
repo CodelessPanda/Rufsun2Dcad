@@ -62,6 +62,9 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
     applyDragFromOriginals,
     setContextMenu
   } = useCadStore();
+  const viewportRef = useRef(viewport);
+  const pendingWheelViewportRef = useRef<typeof viewport | null>(null);
+  const wheelFrameRef = useRef<number | null>(null);
 
   const layersById = useMemo(() => new Map(document.layers.map((layer) => [layer.id, layer])), [document.layers]);
   const visibleObjects = useMemo(
@@ -73,6 +76,10 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
   );
 
   useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
+
+  useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
     const observer = new ResizeObserver(([entry]) => {
@@ -82,20 +89,23 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
       });
     });
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (wheelFrameRef.current !== null) cancelAnimationFrame(wheelFrameRef.current);
+    };
   }, []);
 
   useEffect(() => {
     const nodes = selectedIds
       .filter((id) => {
         const object = document.objects.find((item) => item.id === id);
-        return object ? canInteractWithObject(object, layersById) : false;
+        return object ? canInteractWithObject(object, layersById) && (readOnly || object.layerId === document.settings.activeLayerId) : false;
       })
       .map((id) => nodesRef.current[id])
       .filter(Boolean) as Konva.Node[];
     transformerRef.current?.nodes(nodes);
     transformerRef.current?.getLayer()?.batchDraw();
-  }, [selectedIds, document.objects, layersById]);
+  }, [selectedIds, document.objects, layersById, document.settings.activeLayerId, readOnly]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -119,13 +129,8 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
       const key = event.key.toLowerCase();
       const shortcuts: Record<string, typeof activeTool> = {
         v: "select",
-        l: "line",
-        r: "rectangle",
-        c: "circle",
         f: "roof",
         p: "solar",
-        d: "dimension",
-        m: "measure",
         t: "text"
       };
       if (shortcuts[key]) {
@@ -158,8 +163,24 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
     event.evt.preventDefault();
     const pointer = getPointer();
     if (!pointer) return;
+    const baseViewport = pendingWheelViewportRef.current ?? viewportRef.current;
     const factor = Math.exp(-event.evt.deltaY * 0.0014);
-    setViewport(zoomAroundPoint(viewport, pointer, clampScale(viewport.scale * factor)));
+    const nextViewport = zoomAroundPoint(baseViewport, pointer, clampScale(baseViewport.scale * factor));
+    pendingWheelViewportRef.current = nextViewport;
+    viewportRef.current = nextViewport;
+
+    stageRef.current?.position({ x: nextViewport.x, y: nextViewport.y });
+    stageRef.current?.scale({ x: nextViewport.scale, y: nextViewport.scale });
+    stageRef.current?.batchDraw();
+
+    if (wheelFrameRef.current === null) {
+      wheelFrameRef.current = requestAnimationFrame(() => {
+        const pending = pendingWheelViewportRef.current;
+        pendingWheelViewportRef.current = null;
+        wheelFrameRef.current = null;
+        if (pending) setViewport(pending);
+      });
+    }
   };
 
   const handleMouseDown = (event: Konva.KonvaEventObject<MouseEvent>) => {
@@ -287,7 +308,10 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
     if (panStartRef.current) panStartRef.current = null;
     if (marquee && (activeTool === "select" || readOnly)) {
       const box = marqueeBox(marquee.start, marquee.current);
-      const ids = visibleObjects.filter((object) => rectanglesOverlap(getBoundingBox(object), box)).map((object) => object.id);
+      const ids = visibleObjects
+        .filter((object) => readOnly || object.layerId === document.settings.activeLayerId)
+        .filter((object) => rectanglesOverlap(getBoundingBox(object), box))
+        .map((object) => object.id);
       if (ids.length) selectMany(ids);
       setMarquee(null);
       marqueeStartRef.current = null;
@@ -307,6 +331,8 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
 
   const handleObjectSelect = (id: string, additive: boolean) => {
     if (activeTool !== "select" && !readOnly) return;
+    const object = document.objects.find((item) => item.id === id);
+    if (!object || (!readOnly && object.layerId !== document.settings.activeLayerId)) return;
     if (additive) toggleSelect(id);
     else selectOnly(id);
   };
@@ -449,6 +475,7 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
                 object={object}
                 selected={selectedIds.includes(object.id)}
                 draggable={!readOnly && activeTool === "select" && !locked}
+                listening={readOnly || activeTool !== "select" || object.layerId === document.settings.activeLayerId}
                 scale={viewport.scale}
                 registerNode={(id, node) => {
                   nodesRef.current[id] = node;

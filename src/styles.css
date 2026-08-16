@@ -69,6 +69,26 @@ button {
   font-weight: 800;
 }
 
+.project-name-input {
+  width: clamp(170px, 18vw, 280px);
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #1f2937;
+  background: #f8fafc;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.project-name-input:hover,
+.project-name-input:focus {
+  border-color: #cfd8e3;
+  background: #ffffff;
+  outline: none;
+}
+
 .menu-strip,
 .command-cluster {
   display: flex;
@@ -613,6 +633,43 @@ button {
   border-radius: 6px;
   background: #fef8f3;
   border: 1px solid #f5dcc9;
+}
+
+.finance-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.finance-compare > div {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.finance-compare svg {
+  width: 16px;
+  height: 16px;
+  color: #16855f;
+}
+
+.finance-compare span,
+.finance-compare strong {
+  display: block;
+}
+
+.finance-compare span {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 10px;
+}
+
+.finance-compare strong {
+  color: #1f2937;
+  font-size: 15px;
 }
 
 .revenue-stat svg {

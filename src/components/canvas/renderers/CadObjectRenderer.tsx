@@ -7,6 +7,7 @@ interface Props {
   object: CadObject;
   selected: boolean;
   draggable: boolean;
+  listening: boolean;
   scale: number;
   registerNode: (id: string, node: Konva.Node | null) => void;
   onSelect: (id: string, additive: boolean) => void;

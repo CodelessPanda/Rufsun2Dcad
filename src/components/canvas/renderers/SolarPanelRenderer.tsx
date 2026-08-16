@@ -6,6 +6,7 @@ interface Props {
   object: SolarPanelObject;
   selected: boolean;
   draggable: boolean;
+  listening: boolean;
   scale: number;
   registerNode: (id: string, node: Konva.Node | null) => void;
   onSelect: (id: string, additive: boolean) => void;
@@ -19,6 +20,7 @@ export function SolarPanelRenderer({
   object,
   selected,
   draggable,
+  listening,
   scale,
   registerNode,
   onSelect,
@@ -30,6 +32,7 @@ export function SolarPanelRenderer({
   const cellColumns = object.orientation === "portrait" ? 6 : 12;
   const cellRows = object.orientation === "portrait" ? 12 : 6;
   const frame = Math.max(28, object.thickness);
+  const showCellDetail = Math.min(object.width, object.height) * scale > 48;
 
   return (
     <Group
@@ -39,6 +42,7 @@ export function SolarPanelRenderer({
       y={object.y}
       rotation={object.rotation}
       draggable={draggable}
+      listening={listening}
       dragDistance={4}
       onClick={(event) => {
         event.cancelBubble = true;
@@ -59,11 +63,14 @@ export function SolarPanelRenderer({
         height={object.height}
         fill="#141a21"
         stroke={selected ? "#f28c28" : "#c9d0d8"}
-        strokeWidth={(selected ? 5 : 3) / scale}
+        strokeWidth={selected ? 4 : 2}
+        strokeScaleEnabled={false}
         cornerRadius={18}
         shadowColor={selected ? "#f28c28" : "black"}
         shadowOpacity={selected ? 0.28 : 0.08}
-        shadowBlur={selected ? 12 / scale : 4 / scale}
+        shadowBlur={selected ? 10 : 3}
+        shadowForStrokeEnabled={false}
+        perfectDrawEnabled={false}
       />
       <Rect
         x={frame}
@@ -72,46 +79,57 @@ export function SolarPanelRenderer({
         height={Math.max(1, object.height - frame * 2)}
         fill="#0d1320"
         stroke="#263547"
-        strokeWidth={2 / scale}
+        strokeWidth={1}
+        strokeScaleEnabled={false}
+        perfectDrawEnabled={false}
       />
-      {Array.from({ length: cellColumns + 1 }).map((_, index) => (
-        <Line
-          key={`v-${index}`}
-          points={[
-            frame + ((object.width - frame * 2) / cellColumns) * index,
-            frame,
-            frame + ((object.width - frame * 2) / cellColumns) * index,
-            object.height - frame
-          ]}
-          stroke="#29384c"
-          strokeWidth={2 / scale}
-          listening={false}
-        />
-      ))}
-      {Array.from({ length: cellRows + 1 }).map((_, index) => (
-        <Line
-          key={`h-${index}`}
-          points={[
-            frame,
-            frame + ((object.height - frame * 2) / cellRows) * index,
-            object.width - frame,
-            frame + ((object.height - frame * 2) / cellRows) * index
-          ]}
-          stroke="#29384c"
-          strokeWidth={2 / scale}
-          listening={false}
-        />
-      ))}
-      {[0.34, 0.5, 0.66].map((ratio) => (
-        <Line
-          key={ratio}
-          points={[object.width * ratio, frame, object.width * ratio, object.height - frame]}
-          stroke="#6d7f94"
-          opacity={0.38}
-          strokeWidth={7 / scale}
-          listening={false}
-        />
-      ))}
+      {showCellDetail &&
+        Array.from({ length: cellColumns + 1 }).map((_, index) => (
+          <Line
+            key={`v-${index}`}
+            points={[
+              frame + ((object.width - frame * 2) / cellColumns) * index,
+              frame,
+              frame + ((object.width - frame * 2) / cellColumns) * index,
+              object.height - frame
+            ]}
+            stroke="#29384c"
+            strokeWidth={1}
+            strokeScaleEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      {showCellDetail &&
+        Array.from({ length: cellRows + 1 }).map((_, index) => (
+          <Line
+            key={`h-${index}`}
+            points={[
+              frame,
+              frame + ((object.height - frame * 2) / cellRows) * index,
+              object.width - frame,
+              frame + ((object.height - frame * 2) / cellRows) * index
+            ]}
+            stroke="#29384c"
+            strokeWidth={1}
+            strokeScaleEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        ))}
+      {showCellDetail &&
+        [0.34, 0.5, 0.66].map((ratio) => (
+          <Line
+            key={ratio}
+            points={[object.width * ratio, frame, object.width * ratio, object.height - frame]}
+            stroke="#6d7f94"
+            opacity={0.38}
+            strokeWidth={2}
+            strokeScaleEnabled={false}
+            listening={false}
+            perfectDrawEnabled={false}
+          />
+        ))}
       {object.warning && (
         <Text
           text="!"

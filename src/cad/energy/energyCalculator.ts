@@ -25,6 +25,14 @@ export interface EnergyGenerationResult {
   performanceRatio: number; // % (temperature + angle factor applied to generation)
 }
 
+export interface SystemCostEstimate {
+  costPerWatt: number;
+  systemCost: number;
+  annualSavings: number;
+  paybackYears: number | null;
+  firstYearNet: number;
+}
+
 export interface DummyWeatherData {
   date: string;
   radiance: number; // W/m²
@@ -60,6 +68,21 @@ export function calculatePanelArea(panel: SolarPanelObject): number {
 export function calculateSystemCapacity(panels: SolarPanelObject[]): number {
   const totalWatts = panels.reduce((sum, panel) => sum + panel.wattage, 0);
   return totalWatts / 1000; // Convert W to kW
+}
+
+export function calculateSystemCostEstimate(
+  totalCapacityKwp: number,
+  annualSavings: number,
+  costPerWatt = 2.75
+): SystemCostEstimate {
+  const systemCost = totalCapacityKwp * 1000 * costPerWatt;
+  return {
+    costPerWatt: round(costPerWatt),
+    systemCost: round(systemCost),
+    annualSavings: round(annualSavings),
+    paybackYears: annualSavings > 0 ? round(systemCost / annualSavings) : null,
+    firstYearNet: round(annualSavings - systemCost)
+  };
 }
 
 /**

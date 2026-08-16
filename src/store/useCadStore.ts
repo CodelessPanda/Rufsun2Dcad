@@ -33,6 +33,7 @@ interface CadState {
   selectedModuleId: string;
   contextMenu: { x: number; y: number; ids: string[] } | null;
   setDocument: (document: RufsunCadDocument, recordHistory?: boolean) => void;
+  setProjectName: (name: string) => void;
   newProject: () => void;
   loadDemo: () => void;
   setActiveTool: (tool: CadTool) => void;
@@ -110,6 +111,12 @@ export const useCadStore = create<CadState>((set, get) => ({
 
   setDocument: (document, recordHistory = true) =>
     set((state) => (recordHistory ? withHistory(state, document, []) : { document: touch(document) })),
+  setProjectName: (name) =>
+    set((state) => {
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === state.document.name) return {};
+      return withHistory(state, { ...state.document, name: trimmed });
+    }),
   newProject: () =>
     set((state) => withHistory(state, createBlankDocument(), [])),
   loadDemo: () =>
