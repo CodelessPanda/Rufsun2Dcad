@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
 import type { CadObject, RoofObject, SolarPanelObject } from "../../types/cad";
@@ -102,15 +102,31 @@ function SolarLayoutTools() {
   const [columns, setColumns] = useState(6);
   const [gap, setGap] = useState(120);
   const [orientation, setOrientation] = useState<SolarPanelObject["orientation"]>("portrait");
+  const [selectedRoofId, setSelectedRoofId] = useState<string>("");
   const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
+
   const largestRoof = roofs
     .slice()
     .sort((a, b) => polygonArea(b.points) - polygonArea(a.points))[0];
 
+  const activeRoof = roofs.find((r) => r.id === selectedRoofId) ?? largestRoof;
+
+  const prevRoofCount = useRef(roofs.length);
+  useEffect(() => {
+    if (roofs.length === 0) {
+      setSelectedRoofId("");
+    } else if (roofs.length > prevRoofCount.current) {
+      setSelectedRoofId(roofs[roofs.length - 1].id);
+    } else if (!roofs.some((r) => r.id === selectedRoofId)) {
+      setSelectedRoofId(roofs[roofs.length - 1].id);
+    }
+    prevRoofCount.current = roofs.length;
+  }, [roofs, selectedRoofId]);
+
   const addGrid = () => {
-    if (!largestRoof) return;
+    if (!activeRoof) return;
     const panels = createPanelsForRoofGrid({
-      roof: largestRoof,
+      roof: activeRoof,
       module,
       rows,
       columns,
@@ -119,32 +135,47 @@ function SolarLayoutTools() {
       zIndexStart: nextZ(document.objects),
       layerId: preferredSolarLayer(document)
     });
-    if (panels.length) addObjects(panels, panels.map((panel) => panel.id));
+    if (panels.length) {
+      addObjects(panels, panels.map((panel) => panel.id));
+      setSelectedRoofId(activeRoof.id);
+    }
   };
 
   const autoFill = () => {
+    if (!activeRoof) return;
     const layerId = preferredSolarLayer(document);
-    let zIndex = nextZ(document.objects);
-    const panels = roofs.flatMap((roof) => {
-      const roofPanels = createPanelsForRoofGrid({
-        roof,
-        module,
-        rows: 99,
-        columns: 99,
-        gap,
-        orientation,
-        zIndexStart: zIndex,
-        layerId
-      });
-      zIndex += roofPanels.length;
-      return roofPanels;
+    const zIndex = nextZ(document.objects);
+    const panels = createPanelsForRoofGrid({
+      roof: activeRoof,
+      module,
+      rows: 99,
+      columns: 99,
+      gap,
+      orientation,
+      zIndexStart: zIndex,
+      layerId
     });
-    if (panels.length) addObjects(panels, panels.map((panel) => panel.id));
+    if (panels.length) {
+      addObjects(panels, panels.map((panel) => panel.id));
+      setSelectedRoofId(activeRoof.id);
+    }
   };
 
   return (
     <section className="panel-section solar-layout-tools">
       <h2>Solar Layout</h2>
+      {roofs.length > 0 && (
+        <label className="field">
+          <span>Target Roof</span>
+          <select value={activeRoof?.id ?? ""} onChange={(event) => setSelectedRoofId(event.target.value)}>
+            {roofs.map((roof, index) => (
+              <option key={roof.id} value={roof.id}>
+                {roof.name || `Roof ${index + 1}`} ({(polygonArea(roof.points) / 1_000_000).toFixed(1)} m²)
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
         {sampleSolarModules.map((module) => (
           <option key={module.id} value={module.id}>
@@ -165,17 +196,17 @@ function SolarLayoutTools() {
         </label>
       </div>
       <div className="layout-actions">
-        <button className="primary-action" onClick={addGrid} disabled={!largestRoof}>
+        <button className="primary-action" onClick={addGrid} disabled={!activeRoof}>
           Create Grid
         </button>
-        <button className="secondary-action" onClick={autoFill} disabled={roofs.length === 0}>
+        <button className="secondary-action" onClick={autoFill} disabled={!activeRoof}>
           Auto Fill Roof
         </button>
       </div>
       <p className="fine-print">
         {roofs.length === 0
           ? "Draw a roof first to place arrays automatically."
-          : "Panels are only added where the full module footprint fits inside the roof."}
+          : "Panels are only added where the full module footprint fits inside the selected roof."}
       </p>
     </section>
   );
