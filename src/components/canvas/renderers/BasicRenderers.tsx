@@ -136,6 +136,13 @@ export function PolygonRenderer(props: SharedProps<PolygonObject | RoofObject>) 
   const flatPoints = object.points.flatMap((point) => [point.x - object.x, point.y - object.y]);
   const isRoof = object.type === "roof";
   const area = isRoof ? polygonArea(object.points) / 1_000_000 : 0;
+  const roofLabel = isRoof
+    ? (() => {
+        const minX = Math.min(...object.points.map((p) => p.x));
+        const minY = Math.min(...object.points.map((p) => p.y));
+        return { x: minX - object.x, y: minY - object.y };
+      })()
+    : null;
   const setbackPoints =
     isRoof && object.setback > 0
       ? object.points.flatMap((point) => {
@@ -159,16 +166,16 @@ export function PolygonRenderer(props: SharedProps<PolygonObject | RoofObject>) 
       {setbackPoints.length > 0 && (
         <Line points={setbackPoints} closed stroke="#16855f" dash={[80, 60]} strokeWidth={2 / scale} listening={false} />
       )}
-      {isRoof && (
+      {isRoof && roofLabel && (
         <>
-          <Label x={20} y={20} listening={false}>
-            <Tag fill="white" stroke="#d3ded8" strokeWidth={1 / scale} cornerRadius={4} />
+          <Label x={roofLabel.x} y={roofLabel.y - 16 / scale} listening={false}>
+            <Tag fill="rgba(255,255,255,0.92)" stroke="#d7e4de" strokeWidth={1 / scale} cornerRadius={4 / scale} />
             <Text
-              text={`${object.name}\nArea: ${area.toFixed(1)} m2`}
-              padding={24}
+              text={`${object.name}  Area: ${area.toFixed(1)} m²`}
+              padding={4 / scale}
               fill="#155e47"
-              fontSize={140}
-              lineHeight={1.25}
+              fontSize={12 / scale}
+              fontStyle="600"
             />
           </Label>
           {object.points.map((point, index) => {
