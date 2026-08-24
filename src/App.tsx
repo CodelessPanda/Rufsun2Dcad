@@ -42,6 +42,7 @@ export function App() {
   const redo = useCadStore((state) => state.redo);
   const setDraft = useCadStore((state) => state.setDraft);
   const setGuides = useCadStore((state) => state.setGuides);
+  const toast = useCadStore((state) => state.toast);
 
   useEffect(() => {
     localStorage.setItem("rufsun.panelWidth", String(panelWidth));
@@ -230,6 +231,7 @@ export function App() {
           </main>
           {viewMode === "editor" && <StatusBar />}
           <ContextMenu />
+          {toast && <div className="toast">{toast}</div>}
         </div>
       )}
       <NewProjectDialog

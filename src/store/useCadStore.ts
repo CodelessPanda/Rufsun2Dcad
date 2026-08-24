@@ -66,6 +66,8 @@ interface CadState {
   bringForward: (ids: string[]) => void;
   sendBackward: (ids: string[]) => void;
   lockObjects: (ids: string[], locked: boolean) => void;
+  toast: string;
+  showToast: (message: string) => void;
 }
 
 const initialDocument = createBlankDocument();
@@ -108,6 +110,7 @@ export const useCadStore = create<CadState>((set, get) => ({
   autosaveStatus: "idle",
   selectedModuleId: "generic-mono-550",
   contextMenu: null,
+  toast: "",
 
   setDocument: (document, recordHistory = true) =>
     set((state) => (recordHistory ? withHistory(state, document, []) : { document: touch(document) })),
@@ -311,7 +314,11 @@ export const useCadStore = create<CadState>((set, get) => ({
         ...state.document,
         objects: state.document.objects.map((object) => (ids.includes(object.id) ? { ...object, locked } : object))
       })
-    )
+    ),
+  showToast: (message) => {
+    set({ toast: message });
+    setTimeout(() => set({ toast: "" }), 3000);
+  }
 }));
 
 function markPanelRoofWarnings(objects: CadObject[]): CadObject[] {

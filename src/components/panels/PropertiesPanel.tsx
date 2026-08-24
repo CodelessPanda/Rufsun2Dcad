@@ -4,7 +4,7 @@ import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
 import type { CadObject, RoofObject, SolarPanelObject } from "../../types/cad";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel } from "../../cad/geometry/geometry";
+import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel, panelOverlapsExisting } from "../../cad/geometry/geometry";
 import { createSolarPanel, nextZ } from "../../cad/objects/factory";
 
 export function PropertiesPanel() {
@@ -97,6 +97,7 @@ function SolarLayoutTools() {
   const selectedModuleId = useCadStore((state) => state.selectedModuleId);
   const setSelectedModuleId = useCadStore((state) => state.setSelectedModuleId);
   const addObjects = useCadStore((state) => state.addObjects);
+  const showToast = useCadStore((state) => state.showToast);
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(6);
@@ -125,7 +126,8 @@ function SolarLayoutTools() {
 
   const addGrid = () => {
     if (!activeRoof) return;
-    const panels = createPanelsForRoofGrid({
+    const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+    const { panels, skipped } = createPanelsForRoofGrid({
       roof: activeRoof,
       module,
       rows,
@@ -133,19 +135,24 @@ function SolarLayoutTools() {
       gap,
       orientation,
       zIndexStart: nextZ(document.objects),
-      layerId: preferredSolarLayer(document)
+      layerId: preferredSolarLayer(document),
+      existingPanels
     });
     if (panels.length) {
       addObjects(panels, panels.map((panel) => panel.id));
       setSelectedRoofId(activeRoof.id);
+      if (skipped > 0) showToast(`${panels.length} panels placed — ${skipped} positions skipped (occupied)`);
+    } else {
+      showToast("No space available — all positions overlap existing panels");
     }
   };
 
   const autoFill = () => {
     if (!activeRoof) return;
+    const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
     const layerId = preferredSolarLayer(document);
     const zIndex = nextZ(document.objects);
-    const panels = createPanelsForRoofGrid({
+    const { panels, skipped } = createPanelsForRoofGrid({
       roof: activeRoof,
       module,
       rows: 99,
@@ -153,11 +160,15 @@ function SolarLayoutTools() {
       gap,
       orientation,
       zIndexStart: zIndex,
-      layerId
+      layerId,
+      existingPanels
     });
     if (panels.length) {
       addObjects(panels, panels.map((panel) => panel.id));
       setSelectedRoofId(activeRoof.id);
+      if (skipped > 0) showToast(`${panels.length} panels placed — ${skipped} positions skipped (occupied)`);
+    } else {
+      showToast("No space available — all positions overlap existing panels");
     }
   };
 
@@ -290,7 +301,16 @@ function SolarProperties({
   const makeArray = () => {
     const panels = buildSolarArray(object, { rows, columns, horizontalGap, verticalGap, orientation });
     const newPanels = panels.slice(1);
-    addObjects(newPanels, [object.id, ...newPanels.map((panel) => panel.id)]);
+    const existingPanels = useCadStore.getState().document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+    const filtered = newPanels.filter((panel) => !panelOverlapsExisting(panel, existingPanels));
+    if (filtered.length) {
+      addObjects(filtered, [object.id, ...filtered.map((panel) => panel.id)]);
+      if (filtered.length < newPanels.length) {
+        useCadStore.getState().showToast(`${filtered.length} panels added — ${newPanels.length - filtered.length} skipped (occupied)`);
+      }
+    } else {
+      useCadStore.getState().showToast("No space available — all positions overlap existing panels");
+    }
   };
 
   return (
@@ -467,7 +487,8 @@ function createPanelsForRoofGrid({
   gap,
   orientation,
   zIndexStart,
-  layerId
+  layerId,
+  existingPanels
 }: {
   roof: RoofObject;
   module: (typeof sampleSolarModules)[number];
@@ -477,6 +498,7 @@ function createPanelsForRoofGrid({
   orientation: SolarPanelObject["orientation"];
   zIndexStart: number;
   layerId: string;
+  existingPanels: SolarPanelObject[];
 }) {
   const seed = createSolarPanel({ x: 0, y: 0 }, module, layerId, zIndexStart, orientation);
   const box = getBoundingBox(roof);
@@ -486,6 +508,7 @@ function createPanelsForRoofGrid({
   const maxX = box.x + box.width - margin - seed.width;
   const maxY = box.y + box.height - margin - seed.height;
   const panels: SolarPanelObject[] = [];
+  let skipped = 0;
   const rowLimit = Math.min(rows, 120);
   const columnLimit = Math.min(columns, 120);
 
@@ -497,11 +520,15 @@ function createPanelsForRoofGrid({
       if (x > maxX) break;
       const panel = createSolarPanel({ x, y }, module, layerId, zIndexStart + panels.length, orientation);
       panel.moduleGap = gap;
-      if (roofContainsPanel(panel, [roof])) panels.push(panel);
+      if (roofContainsPanel(panel, [roof]) && !panelOverlapsExisting(panel, existingPanels)) {
+        panels.push(panel);
+      } else {
+        skipped += 1;
+      }
     }
   }
 
-  return panels;
+  return { panels, skipped };
 }
 
 function preferredSolarLayer(document: ReturnType<typeof useCadStore.getState>["document"]) {

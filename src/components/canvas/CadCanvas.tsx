@@ -4,7 +4,7 @@ import type Konva from "konva";
 import { useCadStore } from "../../store/useCadStore";
 import type { CadObject, Point, SolarPanelObject } from "../../types/cad";
 import { clampScale, screenToWorld, zoomAroundPoint } from "../../cad/viewport/viewport";
-import { getBoundingBox, rectanglesOverlap } from "../../cad/geometry/geometry";
+import { getBoundingBox, rectanglesOverlap, panelOverlapsExisting } from "../../cad/geometry/geometry";
 import { calculateSnap, snapPanelToPanels, snapToGrid } from "../../cad/snapping/snapping";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import {
@@ -60,7 +60,8 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
     updateObject,
     replaceObject,
     applyDragFromOriginals,
-    setContextMenu
+    setContextMenu,
+    showToast
   } = useCadStore();
   const viewportRef = useRef(viewport);
   const pendingWheelViewportRef = useRef<typeof viewport | null>(null);
@@ -209,6 +210,11 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
       const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
       const point = document.settings.snap.grid ? snapToGrid(world, document.settings.grid.minor) : world;
       const panel = createSolarPanel(point, module, getPreferredLayerId("solar", document.settings.activeLayerId, document.layers), nextZ(document.objects));
+      const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+      if (panelOverlapsExisting(panel, existingPanels)) {
+        showToast("Cannot place panel here — space is occupied");
+        return;
+      }
       addObjects([panel], [panel.id]);
       return;
     }

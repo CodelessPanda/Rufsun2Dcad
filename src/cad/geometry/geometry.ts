@@ -248,3 +248,11 @@ export function findContainingRoof(panel: SolarPanelObject, roofs: RoofObject[])
   return roofs.find((roof) => corners.every((corner) => pointInsidePolygon(corner, roof.points)));
 }
 
+export function panelOverlapsExisting(panel: SolarPanelObject, existing: SolarPanelObject[]): boolean {
+  const a = getBoundingBox(panel);
+  return existing.some((other) => {
+    if (other.id === panel.id) return false;
+    return rectanglesOverlap(a, getBoundingBox(other));
+  });
+}
+
