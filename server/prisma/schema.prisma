@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum WorkspaceStatus {
+  active
+  archived
+}
+
+enum WorkspaceMemberRole {
+  owner
+  admin
+  designer
+  sales
+  viewer
+}
+
+enum WorkspaceMemberStatus {
+  active
+  invited
+  disabled
+}
+
+enum CustomerType {
+  individual
+  business
+}
+
+enum ProjectStatus {
+  draft
+  active
+  completed
+  archived
+}
+
+model User {
+  id              String             @id @default(uuid()) @db.Uuid
+  name            String
+  email           String             @unique
+  passwordHash    String             @map("password_hash")
+  avatarUrl       String?            @map("avatar_url")
+  status          UserStatus         @default(active)
+  emailVerifiedAt DateTime?          @map("email_verified_at")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  memberships     WorkspaceMember[]
+  createdSpaces   Workspace[]        @relation("WorkspaceCreator")
+  customers       Customer[]         @relation("CustomerCreator")
+  projectsCreated Project[]          @relation("ProjectCreator")
+  projectsUpdated Project[]          @relation("ProjectUpdater")
+  sessions        RefreshSession[]
+
+  @@map("users")
+}
+
+model Workspace {
+  id          String             @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String             @unique
+  logoUrl     String?            @map("logo_url")
+  email       String?
+  phone       String?
+  website     String?
+  address     String?
+  city        String?
+  state       String?
+  country     String?
+  postalCode  String?            @map("postal_code")
+  status      WorkspaceStatus    @default(active)
+  createdById String             @map("created_by") @db.Uuid
+  createdBy   User               @relation("WorkspaceCreator", fields: [createdById], references: [id])
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  members     WorkspaceMember[]
+  customers   Customer[]
+  projects    Project[]
+  documents   ProjectDocument[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String                @id @default(uuid()) @db.Uuid
+  workspaceId String                @map("workspace_id") @db.Uuid
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id])
+  userId      String                @map("user_id") @db.Uuid
+  user        User                  @relation(fields: [userId], references: [id])
+  role        WorkspaceMemberRole
+  status      WorkspaceMemberStatus @default(active)
+  invitedById String?               @map("invited_by") @db.Uuid
+  joinedAt    DateTime?             @map("joined_at")
+  createdAt   DateTime              @default(now()) @map("created_at")
+  updatedAt   DateTime              @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, userId])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model Customer {
+  id              String       @id @default(uuid()) @db.Uuid
+  workspaceId     String       @map("workspace_id") @db.Uuid
+  workspace       Workspace    @relation(fields: [workspaceId], references: [id])
+  customerType    CustomerType @default(individual) @map("customer_type")
+  name            String
+  companyName     String?      @map("company_name")
+  email           String?
+  phone           String?
+  alternatePhone  String?      @map("alternate_phone")
+  address         String?
+  addressLine2    String?      @map("address_line_2")
+  city            String?
+  state           String?
+  postalCode      String?      @map("postal_code")
+  country         String?
+  latitude        Float?
+  longitude       Float?
+  placeId         String?      @map("place_id")
+  notes           String?
+  createdById     String       @map("created_by") @db.Uuid
+  createdBy       User         @relation("CustomerCreator", fields: [createdById], references: [id])
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  archivedAt      DateTime?    @map("archived_at")
+  projects        Project[]
+
+  @@index([workspaceId])
+  @@map("customers")
+}
+
+model Project {
+  id           String           @id @default(uuid()) @db.Uuid
+  workspaceId  String           @map("workspace_id") @db.Uuid
+  workspace    Workspace        @relation(fields: [workspaceId], references: [id])
+  customerId   String           @map("customer_id") @db.Uuid
+  customer     Customer         @relation(fields: [customerId], references: [id])
+  name         String
+  description  String?
+  address      String?
+  addressLine2 String?          @map("address_line_2")
+  city         String?
+  state        String?
+  postalCode   String?          @map("postal_code")
+  country      String?
+  latitude     Float?
+  longitude    Float?
+  placeId      String?          @map("place_id")
+  status       ProjectStatus    @default(draft)
+  systemSizeKw Float?           @map("system_size_kw")
+  panelCount   Int?             @map("panel_count")
+  createdById  String           @map("created_by") @db.Uuid
+  createdBy    User             @relation("ProjectCreator", fields: [createdById], references: [id])
+  updatedById  String?          @map("updated_by") @db.Uuid
+  updatedBy    User?            @relation("ProjectUpdater", fields: [updatedById], references: [id])
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  archivedAt   DateTime?        @map("archived_at")
+  document     ProjectDocument?
+
+  @@index([workspaceId])
+  @@index([customerId])
+  @@map("projects")
+}
+
+model ProjectDocument {
+  id            String    @id @default(uuid()) @db.Uuid
+  workspaceId   String    @map("workspace_id") @db.Uuid
+  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  projectId     String    @unique @map("project_id") @db.Uuid
+  project       Project   @relation(fields: [projectId], references: [id])
+  documentJson  Json      @map("document_json")
+  schemaVersion String    @default("1") @map("schema_version")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@map("project_documents")
+}
+
+model RefreshSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_sessions")
+}

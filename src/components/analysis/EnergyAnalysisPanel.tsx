@@ -4,10 +4,16 @@ import { useCadStore } from "../../store/useCadStore";
 import type { RoofObject, SolarPanelObject } from "../../types/cad";
 import type { TimePeriod } from "../../cad/energy/energyCalculator";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
+import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
+import { buildRoofAnnualFluxMap } from "../../cad/solar/solarAnalysis";
 
 const PERIODS = ["today", "week", "month", "year"] as const;
 
-export function EnergyAnalysisPanel() {
+interface Props {
+  solarExposure?: ProjectSolarDataState;
+}
+
+export function EnergyAnalysisPanel({ solarExposure }: Props) {
   const document = useCadStore((state) => state.document);
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>("month");
   const [electricityRate, setElectricityRate] = useState(0.12);
@@ -18,6 +24,7 @@ export function EnergyAnalysisPanel() {
   const allPanels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const panels = filterPanelsOnRoofs(allPanels, roofs);
+  const annualFluxByRoofId = buildRoofAnnualFluxMap(roofs, solarExposure);
 
   if (allPanels.length === 0) {
     return (
@@ -47,6 +54,7 @@ export function EnergyAnalysisPanel() {
     panels,
     roofs,
     averageRadiance,
+    annualFluxByRoofId,
     temperatureCorrectionFactor: 0.95,
     sunlightHours,
     electricityRate
@@ -60,7 +68,7 @@ export function EnergyAnalysisPanel() {
       <section className="panel-section">
         <h2>Energy Analysis</h2>
         <p className="fine-print">
-          Projections based on {panels.length} installed panel{panels.length === 1 ? "" : "s"} and dummy weather data.
+          Projections based on {panels.length} installed panel{panels.length === 1 ? "" : "s"} and {current.dataSource === "solar-api" ? "Google Solar annual flux" : "dummy weather data"}.
         </p>
       </section>
 
@@ -87,6 +95,7 @@ export function EnergyAnalysisPanel() {
         <Stat icon={<Gauge />} label="Panel Count" value={current.panelCount} />
         <Stat icon={<TrendingUp />} label="System Efficiency" value={`${current.efficiency}%`} />
         <Stat icon={<Sun />} label="Peak Sun Hours" value={`${current.dailyPeakSunHours} h/day`} />
+        {current.averageAnnualFlux && <Stat label="Annual Solar Flux" value={`${current.averageAnnualFlux.toLocaleString()} kWh/kW/year`} />}
       </section>
 
       {/* Energy Generation */}
@@ -159,22 +168,26 @@ export function EnergyAnalysisPanel() {
           step={0.01}
           onChange={setElectricityRate}
         />
-        <NumberField
-          label="Irradiance"
-          value={averageRadiance}
-          suffix="W/m²"
-          min={0}
-          step={10}
-          onChange={setAverageRadiance}
-        />
-        <NumberField
-          label="Sunlight"
-          value={sunlightHours}
-          suffix="h/day"
-          min={0}
-          step={0.5}
-          onChange={setSunlightHours}
-        />
+        {current.dataSource === "assumption" && (
+          <>
+            <NumberField
+              label="Irradiance"
+              value={averageRadiance}
+              suffix="W/m²"
+              min={0}
+              step={10}
+              onChange={setAverageRadiance}
+            />
+            <NumberField
+              label="Sunlight"
+              value={sunlightHours}
+              suffix="h/day"
+              min={0}
+              step={0.5}
+              onChange={setSunlightHours}
+            />
+          </>
+        )}
         <NumberField
           label="Install cost"
           value={costPerWatt}
@@ -189,9 +202,9 @@ export function EnergyAnalysisPanel() {
       <section className="panel-section compact">
         <h3>Notes</h3>
         <ul className="notes-list">
-          <li>Energy = Capacity × Peak Sun Hours × Performance Ratio</li>
+          <li>{current.dataSource === "solar-api" ? "Energy = Capacity × annual Solar API flux × temperature factor" : "Energy = Capacity × Peak Sun Hours × Performance Ratio"}</li>
           <li>Temperature loss factor: 95%</li>
-          <li>Efficiency based on angle and azimuth</li>
+          <li>{current.dataSource === "solar-api" ? "Solar API data replaces manual irradiance and sunlight assumptions" : "Efficiency based on angle and azimuth"}</li>
           <li>Rate: configurable (default $0.12/kWh)</li>
           <li>Weather data: dummy forecast (API-ready)</li>
         </ul>

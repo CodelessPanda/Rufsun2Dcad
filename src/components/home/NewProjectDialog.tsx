@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CreateCustomerInput, Customer } from "../../api/types";
 import type { MapCaptureSettings } from "../../types/cad";
 import {
   googleStaticMapUrl,
@@ -15,21 +16,49 @@ interface Props {
   open: boolean;
   busy: boolean;
   googleMapsApiKey: string;
+  customers: Customer[];
+  preselectedCustomerId?: string | null;
   onCancel: () => void;
-  onCreate: (customerName: string, address: string, mapCapture?: MapCaptureSettings) => Promise<void>;
+  onCreateCustomer: (input: CreateCustomerInput) => Promise<Customer>;
+  onCreate: (input: {
+    customer: Customer;
+    projectName: string;
+    installationAddress: string;
+    mapCapture?: MapCaptureSettings;
+    placeId?: string;
+    latitude?: number;
+    longitude?: number;
+  }) => Promise<void>;
 }
 
-export function NewProjectDialog({ open, busy, googleMapsApiKey, onCancel, onCreate }: Props) {
+export function NewProjectDialog({
+  open,
+  busy,
+  googleMapsApiKey,
+  customers,
+  preselectedCustomerId,
+  onCancel,
+  onCreateCustomer,
+  onCreate
+}: Props) {
   const addressInputRef = useRef<HTMLInputElement | null>(null);
   const mapRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<GoogleMap | null>(null);
   const markerRef = useRef<GoogleMarker | null>(null);
-  const [customerName, setCustomerName] = useState("");
+  const [customerId, setCustomerId] = useState(preselectedCustomerId ?? "");
+  const [quickCustomerOpen, setQuickCustomerOpen] = useState(false);
+  const [quickCustomer, setQuickCustomer] = useState({ name: "", phone: "", email: "" });
+  const [projectName, setProjectName] = useState("");
   const [address, setAddress] = useState("");
   const [place, setPlace] = useState<GooglePlace | null>(null);
   const [mapWidthM, setMapWidthM] = useState(85);
   const [mapHeightM, setMapHeightM] = useState(85);
   const [mapError, setMapError] = useState("");
+  const selectedCustomer = customers.find((customer) => customer.id === customerId) ?? null;
+
+  useEffect(() => {
+    if (open) setCustomerId(preselectedCustomerId ?? "");
+  }, [open, preselectedCustomerId]);
 
   const mapCapture = useMemo(() => {
     const location = place?.geometry?.location;
@@ -140,18 +169,38 @@ export function NewProjectDialog({ open, busy, googleMapsApiKey, onCancel, onCre
   if (!open) return null;
 
   const submit = async () => {
-    const trimmedName = customerName.trim();
-    if (!trimmedName) return;
+    if (!selectedCustomer || !projectName.trim()) return;
     if (googleMapsApiKey && !mapCapture) {
       setMapError("Select a complete validated address before creating the project.");
       return;
     }
-    await onCreate(trimmedName, (place?.formatted_address ?? address).trim(), mapCapture);
-    setCustomerName("");
+    const location = place?.geometry?.location;
+    await onCreate({
+      customer: selectedCustomer,
+      projectName: projectName.trim(),
+      installationAddress: (place?.formatted_address ?? address).trim(),
+      mapCapture,
+      placeId: place?.place_id,
+      latitude: location?.lat(),
+      longitude: location?.lng()
+    });
+    setProjectName("");
     setAddress("");
     setPlace(null);
     mapInstanceRef.current = null;
     markerRef.current = null;
+  };
+
+  const createQuickCustomer = async () => {
+    if (!quickCustomer.name.trim()) return;
+    const customer = await onCreateCustomer({
+      name: quickCustomer.name.trim(),
+      phone: quickCustomer.phone.trim(),
+      email: quickCustomer.email.trim()
+    });
+    setCustomerId(customer.id);
+    setQuickCustomer({ name: "", phone: "", email: "" });
+    setQuickCustomerOpen(false);
   };
 
   return (
@@ -166,16 +215,46 @@ export function NewProjectDialog({ open, busy, googleMapsApiKey, onCancel, onCre
       >
         <h2>New Project</h2>
         <label className="field stacked">
-          <span>Name of customer</span>
-          <input
-            autoFocus
-            value={customerName}
-            onChange={(event) => setCustomerName(event.target.value)}
-            placeholder="Customer name"
-          />
+          <span>Customer</span>
+          <select autoFocus value={customerId} onChange={(event) => setCustomerId(event.target.value)}>
+            <option value="">Search existing customer</option>
+            {customers.map((customer) => (
+              <option key={customer.id} value={customer.id}>
+                {customer.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="secondary-action compact-action" onClick={() => setQuickCustomerOpen((open) => !open)}>
+          + Create Customer
+        </button>
+        {quickCustomerOpen && (
+          <div className="quick-create-box">
+            <label className="field stacked">
+              <span>Name *</span>
+              <input value={quickCustomer.name} onChange={(event) => setQuickCustomer((current) => ({ ...current, name: event.target.value }))} />
+            </label>
+            <div className="form-grid-two">
+              <label className="field stacked">
+                <span>Phone</span>
+                <input value={quickCustomer.phone} onChange={(event) => setQuickCustomer((current) => ({ ...current, phone: event.target.value }))} />
+              </label>
+              <label className="field stacked">
+                <span>Email</span>
+                <input type="email" value={quickCustomer.email} onChange={(event) => setQuickCustomer((current) => ({ ...current, email: event.target.value }))} />
+              </label>
+            </div>
+            <button type="button" className="primary-action compact-action" disabled={busy || !quickCustomer.name.trim()} onClick={() => void createQuickCustomer()}>
+              Create Customer
+            </button>
+          </div>
+        )}
+        <label className="field stacked">
+          <span>Project name</span>
+          <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Rohini Residence" />
         </label>
         <label className="field stacked">
-          <span>Address</span>
+          <span>Installation address</span>
           <input
             ref={addressInputRef}
             value={address}
@@ -212,7 +291,7 @@ export function NewProjectDialog({ open, busy, googleMapsApiKey, onCancel, onCre
           <button type="button" onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button type="submit" disabled={busy || !customerName.trim()}>
+          <button type="submit" disabled={busy || !selectedCustomer || !projectName.trim()}>
             Create
           </button>
         </div>

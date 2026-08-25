@@ -37,7 +37,7 @@ export function ProjectHome({ projects, googleMapsApiKey, onSaveGoogleMapsApiKey
           <section className="settings-panel">
             <h2>Settings</h2>
             <label className="field stacked">
-              <span>Google Maps API key</span>
+              <span>Google Maps / Solar API key</span>
               <input
                 value={apiKeyDraft}
                 onChange={(event) => setApiKeyDraft(event.target.value)}

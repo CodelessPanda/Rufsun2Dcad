@@ -4,10 +4,22 @@ import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
 import type { CadObject, RoofObject, SolarPanelObject } from "../../types/cad";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel, panelOverlapsExisting } from "../../cad/geometry/geometry";
+import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel, panelOverlapsExisting, rotatePoint } from "../../cad/geometry/geometry";
 import { createSolarPanel, nextZ } from "../../cad/objects/factory";
+import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
+import { SolarExposurePanel } from "./SolarExposurePanel";
 
-export function PropertiesPanel() {
+interface PropertiesPanelProps {
+  solarExposure?: ProjectSolarDataState;
+  onLoadSolarExposure?: () => void;
+  onToggleSolarExposure?: (visible: boolean) => void;
+}
+
+export function PropertiesPanel({
+  solarExposure,
+  onLoadSolarExposure,
+  onToggleSolarExposure
+}: PropertiesPanelProps) {
   const document = useCadStore((state) => state.document);
   const selectedIds = useCadStore((state) => state.selectedIds);
   const activeTool = useCadStore((state) => state.activeTool);
@@ -17,10 +29,39 @@ export function PropertiesPanel() {
   const setLayer = useCadStore((state) => state.setLayer);
   const setActiveLayer = useCadStore((state) => state.setActiveLayer);
   const selectedObjects = document.objects.filter((object) => selectedIds.includes(object.id));
+  const selectedRoof = selectedObjects.length === 1 && selectedObjects[0].type === "roof" ? selectedObjects[0] : undefined;
+  const showGlobalSolarExposure =
+    solarExposure &&
+    onLoadSolarExposure &&
+    onToggleSolarExposure &&
+    selectedRoof === undefined;
 
   return (
     <aside className="properties-panel">
-      {selectedObjects.length === 0 ? <DocumentSummary /> : selectedObjects.length === 1 ? <SingleObject object={selectedObjects[0]} updateObject={updateObject} addObjects={addObjects} /> : <MultiSelection objects={selectedObjects} />}
+      {selectedObjects.length === 0 ? (
+        <DocumentSummary />
+      ) : selectedObjects.length === 1 ? (
+        <SingleObject
+          object={selectedObjects[0]}
+          updateObject={updateObject}
+          addObjects={addObjects}
+          solarExposure={solarExposure}
+          onLoadSolarExposure={onLoadSolarExposure}
+          onToggleSolarExposure={onToggleSolarExposure}
+        />
+      ) : (
+        <MultiSelection objects={selectedObjects} />
+      )}
+
+      {showGlobalSolarExposure && (
+        <section className="panel-section">
+          <SolarExposurePanel
+            solarExposure={solarExposure}
+            onLoad={onLoadSolarExposure}
+            onToggleVisible={onToggleSolarExposure}
+          />
+        </section>
+      )}
 
       {activeTool === "solar" && <SolarLayoutTools />}
 
@@ -101,7 +142,7 @@ function SolarLayoutTools() {
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(6);
-  const [gap, setGap] = useState(120);
+  const [gap, setGap] = useState(20);
   const [orientation, setOrientation] = useState<SolarPanelObject["orientation"]>("portrait");
   const [selectedRoofId, setSelectedRoofId] = useState<string>("");
   const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
@@ -226,11 +267,17 @@ function SolarLayoutTools() {
 function SingleObject({
   object,
   updateObject,
-  addObjects
+  addObjects,
+  solarExposure,
+  onLoadSolarExposure,
+  onToggleSolarExposure
 }: {
   object: CadObject;
   updateObject: (id: string, patch: Partial<CadObject>, recordHistory?: boolean) => void;
   addObjects: (objects: CadObject[], selectIds?: string[]) => void;
+  solarExposure?: ProjectSolarDataState;
+  onLoadSolarExposure?: () => void;
+  onToggleSolarExposure?: (visible: boolean) => void;
 }) {
   const document = useCadStore((state) => state.document);
   return (
@@ -238,7 +285,11 @@ function SingleObject({
       <h2>{labelFor(object)}</h2>
       <NumberField label="X" value={object.x} suffix="mm" onCommit={(x) => updateObject(object.id, { x } as Partial<CadObject>)} />
       <NumberField label="Y" value={object.y} suffix="mm" onCommit={(y) => updateObject(object.id, { y } as Partial<CadObject>)} />
-      <NumberField label="Rotation" value={object.rotation} suffix="deg" onCommit={(rotation) => updateObject(object.id, { rotation } as Partial<CadObject>)} />
+      {object.type === "solarPanel" ? (
+        <Stat label="Roof azimuth" value={`${object.rotation} deg`} />
+      ) : (
+        <NumberField label="Rotation" value={object.rotation} suffix="deg" onCommit={(rotation) => updateObject(object.id, { rotation } as Partial<CadObject>)} />
+      )}
       <Toggle label="Locked" checked={object.locked} onChange={(locked) => updateObject(object.id, { locked } as Partial<CadObject>)} />
       <Toggle label="Visible" checked={object.visible} onChange={(visible) => updateObject(object.id, { visible } as Partial<CadObject>)} />
       <label className="field">
@@ -269,6 +320,14 @@ function SingleObject({
         </>
       )}
       {object.type === "roof" && <RoofProperties object={object} updateObject={updateObject} />}
+      {object.type === "roof" && solarExposure && onLoadSolarExposure && onToggleSolarExposure && (
+        <SolarExposurePanel
+          roof={object}
+          solarExposure={solarExposure}
+          onLoad={onLoadSolarExposure}
+          onToggleVisible={onToggleSolarExposure}
+        />
+      )}
       {object.type === "text" && (
         <>
           <label className="field">
@@ -317,8 +376,8 @@ function SolarProperties({
     <>
       <Stat label="Manufacturer" value={object.manufacturer} />
       <Stat label="Model" value={object.model} />
-      <NumberField label="Width" value={object.width} suffix="mm" onCommit={(width) => updateObject(object.id, { width: Math.max(20, width) } as Partial<CadObject>)} />
-      <NumberField label="Height" value={object.height} suffix="mm" onCommit={(height) => updateObject(object.id, { height: Math.max(20, height) } as Partial<CadObject>)} />
+      <Stat label="Width" value={`${object.width} mm`} />
+      <Stat label="Height" value={`${object.height} mm`} />
       <NumberField label="Power" value={object.wattage} suffix="W" onCommit={(wattage) => updateObject(object.id, { wattage: Math.max(1, wattage) } as Partial<CadObject>)} />
       <NumberField label="Module Gap" value={object.moduleGap} suffix="mm" onCommit={(moduleGap) => updateObject(object.id, { moduleGap: Math.max(0, moduleGap) } as Partial<CadObject>)} />
       <label className="field">
@@ -501,7 +560,11 @@ function createPanelsForRoofGrid({
   existingPanels: SolarPanelObject[];
 }) {
   const seed = createSolarPanel({ x: 0, y: 0 }, module, layerId, zIndexStart, orientation);
-  const box = getBoundingBox(roof);
+  seed.rotation = roof.azimuth;
+  const roofBox = getBoundingBox(roof);
+  const origin = { x: roofBox.x + roofBox.width / 2, y: roofBox.y + roofBox.height / 2 };
+  const localRoofPoints = roof.points.map((point) => rotatePoint(point, origin, -roof.azimuth));
+  const box = boundsFromPoints(localRoofPoints);
   const margin = Math.max(0, roof.setback);
   const startX = box.x + margin;
   const startY = box.y + margin;
@@ -518,8 +581,16 @@ function createPanelsForRoofGrid({
     for (let column = 0; column < columnLimit; column += 1) {
       const x = startX + column * (seed.width + gap);
       if (x > maxX) break;
-      const panel = createSolarPanel({ x, y }, module, layerId, zIndexStart + panels.length, orientation);
+      const centerWorld = rotatePoint({ x: x + seed.width / 2, y: y + seed.height / 2 }, origin, roof.azimuth);
+      const panel = createSolarPanel(
+        { x: centerWorld.x - seed.width / 2, y: centerWorld.y - seed.height / 2 },
+        module,
+        layerId,
+        zIndexStart + panels.length,
+        orientation
+      );
       panel.moduleGap = gap;
+      panel.rotation = roof.azimuth;
       if (roofContainsPanel(panel, [roof]) && !panelOverlapsExisting(panel, existingPanels)) {
         panels.push(panel);
       } else {
@@ -529,6 +600,19 @@ function createPanelsForRoofGrid({
   }
 
   return { panels, skipped };
+}
+
+function boundsFromPoints(points: Array<{ x: number; y: number }>) {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return {
+    x,
+    y,
+    width: Math.max(...xs) - x,
+    height: Math.max(...ys) - y
+  };
 }
 
 function preferredSolarLayer(document: ReturnType<typeof useCadStore.getState>["document"]) {

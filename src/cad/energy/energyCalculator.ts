@@ -7,6 +7,7 @@ export interface EnergyCalculationParams {
   panels: SolarPanelObject[];
   roofs: RoofObject[];
   averageRadiance: number; // W/m², mean daytime irradiance used when no weather data is available
+  annualFluxByRoofId?: Record<string, number>; // kWh/kW/year from Google Solar API annual flux layer
   temperatureCorrectionFactor?: number; // Default: 0.95 (accounts for temperature losses)
   sunlightHours?: number; // Default: 6 (average usable sunlight hours per day)
   electricityRate?: number; // Default: 0.12 ($ per kWh)
@@ -23,6 +24,8 @@ export interface EnergyGenerationResult {
   totalCapacity: number; // kWp
   dailyPeakSunHours: number;
   performanceRatio: number; // % (temperature + angle factor applied to generation)
+  dataSource: "solar-api" | "assumption";
+  averageAnnualFlux?: number;
 }
 
 export interface SystemCostEstimate {
@@ -159,7 +162,8 @@ export function calculateEnergyGeneration(
     panelCount: 0,
     totalCapacity: 0,
     dailyPeakSunHours: 0,
-    performanceRatio: 0
+    performanceRatio: 0,
+    dataSource: "assumption"
   };
 
   if (panelsOnRoofs.length === 0) {
@@ -191,6 +195,26 @@ export function calculateEnergyGeneration(
       0
     ) / panelCount;
 
+  const solarApiEstimate = calculateSolarApiAnnualEstimate(panelsOnRoofs, params.roofs, params.annualFluxByRoofId, temperatureFactor);
+  if (solarApiEstimate) {
+    const totalEnergyKwh = solarApiEstimate.annualEnergyKwh * (daysInPeriod / 365);
+    const dailyEnergyKwh = solarApiEstimate.annualEnergyKwh / 365;
+    return {
+      period,
+      totalEnergyKwh: round(totalEnergyKwh),
+      estimatedRevenue: round(totalEnergyKwh * electricityRate),
+      averageDailyGeneration: round(dailyEnergyKwh),
+      peakGeneration: round(systemCapacity * temperatureFactor),
+      efficiency: round(angleEfficiency * 100),
+      panelCount,
+      totalCapacity: round(systemCapacity),
+      dailyPeakSunHours: round(solarApiEstimate.averageAnnualFlux / 365),
+      performanceRatio: round(temperatureFactor * 100),
+      dataSource: "solar-api",
+      averageAnnualFlux: round(solarApiEstimate.averageAnnualFlux)
+    };
+  }
+
   const peakSunHours = (averageRadiance / 1000) * sunlightHours;
   const performanceRatio = temperatureFactor * angleEfficiency;
   const dailyEnergyKwh = systemCapacity * peakSunHours * performanceRatio;
@@ -212,7 +236,37 @@ export function calculateEnergyGeneration(
     panelCount,
     totalCapacity: round(systemCapacity),
     dailyPeakSunHours: round(peakSunHours),
-    performanceRatio: round(performanceRatio * 100)
+    performanceRatio: round(performanceRatio * 100),
+    dataSource: "assumption"
+  };
+}
+
+function calculateSolarApiAnnualEstimate(
+  panels: SolarPanelObject[],
+  roofs: RoofObject[],
+  annualFluxByRoofId: Record<string, number> | undefined,
+  temperatureFactor: number
+) {
+  if (!annualFluxByRoofId) return null;
+  let annualEnergyKwh = 0;
+  let capacityWithFlux = 0;
+  let weightedFlux = 0;
+
+  for (const panel of panels) {
+    const roof = findContainingRoof(panel, roofs);
+    if (!roof) continue;
+    const annualFlux = annualFluxByRoofId[roof.id];
+    if (!Number.isFinite(annualFlux) || annualFlux <= 0) continue;
+    const capacityKwp = panel.wattage / 1000;
+    annualEnergyKwh += capacityKwp * annualFlux * temperatureFactor;
+    capacityWithFlux += capacityKwp;
+    weightedFlux += annualFlux * capacityKwp;
+  }
+
+  if (annualEnergyKwh <= 0 || capacityWithFlux <= 0) return null;
+  return {
+    annualEnergyKwh,
+    averageAnnualFlux: weightedFlux / capacityWithFlux
   };
 }
 

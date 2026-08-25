@@ -5,11 +5,18 @@ import { createBlankDocument } from "../cad/document/defaultDocument";
 
 export interface SavedProject {
   id: string;
+  cloudProjectId?: string;
+  workspaceId?: string;
+  customerId?: string;
+  projectName?: string;
+  status?: string;
   document: RufsunCadDocument;
   customerName: string;
   address: string;
   createdAt: string;
   savedAt: string;
+  locallyModified?: boolean;
+  cloudSavedAt?: string;
 }
 
 class RufsunCadDatabase extends Dexie {
@@ -23,19 +30,41 @@ class RufsunCadDatabase extends Dexie {
     this.version(2).stores({
       projects: "id,createdAt,savedAt,customerName,address"
     });
+    this.version(3).stores({
+      projects: "id,cloudProjectId,workspaceId,customerId,createdAt,savedAt,customerName,address,locallyModified"
+    });
   }
 }
 
 export const db = new RufsunCadDatabase();
 
-export async function saveProject(id: string, document: RufsunCadDocument) {
+export async function saveProject(id: string, document: RufsunCadDocument, metadata: Partial<SavedProject> = {}) {
+  const existing = await db.projects.get(id);
   await db.projects.put({
+    ...existing,
+    ...metadata,
     id,
     document,
+    projectName: metadata.projectName ?? existing?.projectName ?? document.name,
     customerName: document.customerName?.trim() || document.name,
     address: document.customerAddress?.trim() || "",
-    createdAt: document.createdAt,
+    createdAt: existing?.createdAt || metadata.createdAt || document.createdAt,
     savedAt: new Date().toISOString()
+  });
+}
+
+export async function cacheCloudProject(
+  workspaceId: string,
+  cloudProjectId: string,
+  document: RufsunCadDocument,
+  metadata: Partial<SavedProject> = {}
+) {
+  await saveProject(cloudProjectId, document, {
+    ...metadata,
+    id: cloudProjectId,
+    workspaceId,
+    cloudProjectId,
+    locallyModified: metadata.locallyModified ?? false
   });
 }
 
@@ -88,10 +117,17 @@ export async function loadLastProject(): Promise<RufsunCadDocument | null> {
 function normalizeSavedProject(project: SavedProject): SavedProject {
   return {
     id: project.id,
+    cloudProjectId: project.cloudProjectId,
+    workspaceId: project.workspaceId,
+    customerId: project.customerId,
+    projectName: project.projectName,
+    status: project.status,
     document: project.document,
     customerName: project.customerName || project.document.customerName || project.document.name,
     address: project.address || project.document.customerAddress || "",
     createdAt: project.createdAt || project.document.createdAt || project.savedAt,
-    savedAt: project.savedAt
+    savedAt: project.savedAt,
+    locallyModified: project.locallyModified,
+    cloudSavedAt: project.cloudSavedAt
   };
 }

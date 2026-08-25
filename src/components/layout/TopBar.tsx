@@ -1,22 +1,22 @@
 import type Konva from "konva";
 import { ChevronDown, Download, FileDown, Home, Redo2, RotateCcw, Save, Undo2, ZoomIn, ZoomOut, TrendingUp, Edit3 } from "lucide-react";
-import { jsPDF } from "jspdf";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import type { ViewMode } from "../../App";
 import { useCadStore } from "../../store/useCadStore";
 import { DEFAULT_SCALE, clampScale, zoomPercent } from "../../cad/viewport/viewport";
-import { selectedSolarStats } from "../../store/useCadStore";
-import type { RoofObject, SolarPanelObject } from "../../types/cad";
-import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
+import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
+import { exportProjectReportPdf } from "../../reports/projectReport";
 
 interface Props {
   stageRef: RefObject<Konva.Stage>;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   onShowProjects: () => void;
+  cloudSaveStatus?: "idle" | "saving" | "saved" | "offline" | "error";
+  solarExposure?: ProjectSolarDataState;
 }
 
-export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Props) {
+export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects, cloudSaveStatus = "idle", solarExposure }: Props) {
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const document = useCadStore((state) => state.document);
   const viewport = useCadStore((state) => state.viewport);
@@ -25,7 +25,6 @@ export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Prop
   const undo = useCadStore((state) => state.undo);
   const redo = useCadStore((state) => state.redo);
   const clearSelection = useCadStore((state) => state.clearSelection);
-  const stats = selectedSolarStats(document.objects, document.objects.filter((object) => object.type === "solarPanel").map((object) => object.id));
   const [projectNameDraft, setProjectNameDraft] = useState(document.name);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
@@ -75,84 +74,7 @@ export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Prop
   const exportPdf = () => {
     clearSelection();
     requestAnimationFrame(() => {
-      const image = captureDrawingDataUrl(stageRef.current);
-      if (!image) return;
-      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a3" });
-      const panels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
-      const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
-      const installedPanels = filterPanelsOnRoofs(panels, roofs);
-      const energy = calculateAllPeriods({
-        panels,
-        roofs,
-        averageRadiance: 800,
-        temperatureCorrectionFactor: 0.95,
-        sunlightHours: 6,
-        electricityRate: 0.12
-      });
-      const month = energy.month;
-      const year = energy.year;
-      const costEstimate = calculateSystemCostEstimate(year.totalCapacity, year.estimatedRevenue);
-      const drawingBox = fitImageRect(
-        stageRef.current?.width() ?? 1,
-        stageRef.current?.height() ?? 1,
-        18,
-        39,
-        276,
-        224
-      );
-
-      pdf.setFillColor(247, 249, 250);
-      pdf.rect(0, 0, 420, 297, "F");
-      pdf.setFillColor(255, 255, 255);
-      pdf.rect(12, 12, 288, 273, "F");
-      pdf.rect(306, 12, 102, 273, "F");
-
-      pdf.setFontSize(18);
-      pdf.text(document.name, 18, 24);
-      pdf.setFontSize(9);
-      pdf.setTextColor(90, 103, 116);
-      pdf.text(`RufsunCAD export | ${new Date().toLocaleDateString()}`, 18, 31);
-      pdf.addImage(image, "PNG", drawingBox.x, drawingBox.y, drawingBox.width, drawingBox.height);
-      pdf.setTextColor(31, 41, 55);
-      pdf.setFontSize(9);
-      pdf.text(`Visible CAD drawing. Editor-only grid, guides, and handles are hidden from export.`, 18, 268);
-
-      pdf.setTextColor(22, 133, 95);
-      pdf.setFontSize(14);
-      pdf.text("Analysis", 314, 25);
-      pdf.setTextColor(31, 41, 55);
-      pdf.setFontSize(8.5);
-      pdf.text("System Overview", 314, 38);
-      drawPdfMetric(pdf, 314, 47, "Total modules", String(panels.length));
-      drawPdfMetric(pdf, 314, 55, "Panels inside roof", String(installedPanels.length));
-      drawPdfMetric(pdf, 314, 63, "DC capacity", `${stats.totalKwp.toFixed(2)} kWp`);
-      drawPdfMetric(pdf, 314, 71, "Roof count", String(roofs.length));
-      drawPdfMetric(pdf, 314, 79, "Performance ratio", `${month.performanceRatio}%`);
-      drawPdfMetric(pdf, 314, 87, "System efficiency", `${month.efficiency}%`);
-
-      pdf.setFontSize(8.5);
-      pdf.text("Energy Output", 314, 103);
-      drawPdfMetric(pdf, 314, 112, "Today", `${energy.today.totalEnergyKwh} kWh`);
-      drawPdfMetric(pdf, 314, 120, "Week", `${energy.week.totalEnergyKwh} kWh`);
-      drawPdfMetric(pdf, 314, 128, "Month", `${month.totalEnergyKwh} kWh`);
-      drawPdfMetric(pdf, 314, 136, "Year", `${year.totalEnergyKwh} kWh`);
-      drawPdfMetric(pdf, 314, 144, "Daily average", `${month.averageDailyGeneration} kWh`);
-      drawPdfMetric(pdf, 314, 152, "Peak generation", `${month.peakGeneration} kW`);
-
-      pdf.setFontSize(8.5);
-      pdf.text("Financial Estimate", 314, 168);
-      drawPdfMetric(pdf, 314, 177, "System cost", formatCurrency(costEstimate.systemCost));
-      drawPdfMetric(pdf, 314, 185, "Monthly savings", formatCurrency(month.estimatedRevenue));
-      drawPdfMetric(pdf, 314, 193, "Annual savings", formatCurrency(year.estimatedRevenue));
-      drawPdfMetric(pdf, 314, 201, "Payback", costEstimate.paybackYears === null ? "N/A" : `${costEstimate.paybackYears} years`);
-
-      pdf.setTextColor(100, 116, 139);
-      pdf.setFontSize(7);
-      pdf.text("Assumptions: 800 W/m2 irradiance,", 314, 250);
-      pdf.text("6 h/day sunlight, $0.12/kWh rate,", 314, 257);
-      pdf.text("95% temperature factor.", 314, 264);
-      pdf.text("Only panels fully inside a roof count.", 314, 271);
-      pdf.save(`${document.name.replace(/\s+/g, "-").toLowerCase()}.pdf`);
+      void exportProjectReportPdf({ document, stage: stageRef.current, solarExposure });
     });
   };
 
@@ -203,6 +125,9 @@ export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Prop
         </div>
       </nav>
       <div className="topbar-spacer" />
+      <span className={`cloud-save-pill ${cloudSaveStatus}`}>
+        {cloudSaveLabel(cloudSaveStatus)}
+      </span>
       <div className="view-switcher">
         <button
           className={`view-btn ${viewMode === "editor" ? "active" : ""}`}
@@ -247,6 +172,14 @@ export function TopBar({ stageRef, viewMode, setViewMode, onShowProjects }: Prop
       </div>
     </header>
   );
+}
+
+function cloudSaveLabel(status: NonNullable<Props["cloudSaveStatus"]>) {
+  if (status === "saving") return "Saving...";
+  if (status === "saved") return "Saved to cloud";
+  if (status === "offline") return "Offline - saved locally";
+  if (status === "error") return "Sync failed - retrying";
+  return "Local ready";
 }
 
 function captureDrawingDataUrl(stage?: Konva.Stage | null) {
@@ -294,34 +227,6 @@ function addWhitePngBackground(dataUrl: string) {
     image.onerror = () => resolve(dataUrl);
     image.src = dataUrl;
   });
-}
-
-function drawPdfMetric(pdf: jsPDF, x: number, y: number, label: string, value: string) {
-  pdf.setTextColor(100, 116, 139);
-  pdf.setFontSize(7);
-  pdf.text(label, x, y);
-  pdf.setTextColor(31, 41, 55);
-  pdf.setFontSize(8);
-  pdf.text(value, x + 84, y, { align: "right" });
-}
-
-function formatCurrency(value: number) {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? "-" : ""}$${Math.abs(rounded).toLocaleString()}`;
-}
-
-function fitImageRect(sourceWidth: number, sourceHeight: number, x: number, y: number, maxWidth: number, maxHeight: number) {
-  const safeWidth = Math.max(1, sourceWidth);
-  const safeHeight = Math.max(1, sourceHeight);
-  const ratio = Math.min(maxWidth / safeWidth, maxHeight / safeHeight);
-  const width = safeWidth * ratio;
-  const height = safeHeight * ratio;
-  return {
-    x: x + (maxWidth - width) / 2,
-    y: y + (maxHeight - height) / 2,
-    width,
-    height
-  };
 }
 
 function downloadDataUrl(dataUrl: string, filename: string) {

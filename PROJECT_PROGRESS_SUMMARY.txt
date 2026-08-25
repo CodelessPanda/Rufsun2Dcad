@@ -1,0 +1,255 @@
+RufsunCAD Project Progress Summary
+As of 2026-08-25
+
+This file summarizes what has been built so far in the RufsunCAD 2D solar CAD prototype, based on the current project files.
+
+1. Project foundation
+
+- The app is a Vite + React + TypeScript project.
+- Main libraries in use include React Konva/Konva for the CAD canvas, Zustand for state management, Dexie for browser IndexedDB storage, jsPDF for PDF export, Zod for document schema validation, Lucide React for icons, and Vitest for tests.
+- The main app flow now has two screens:
+  - Project home screen.
+  - Designer screen.
+- The designer supports Editor and Analysis modes.
+
+Important files:
+- src/App.tsx
+- src/store/useCadStore.ts
+- src/types/cad.ts
+- src/schemas/documentSchema.ts
+- src/styles.css
+- package.json
+
+2. Project home screen and database
+
+- A project listing page was added before entering the designer.
+- Projects are stored locally in the browser using IndexedDB through Dexie.
+- The project list shows:
+  - Customer name.
+  - Address.
+  - Date created.
+  - Open button.
+  - Delete icon.
+- Deleting a project shows a warning confirmation before removal.
+- A New Project flow asks for customer name and address before opening the designer.
+- The app autosaves the active designer project back to IndexedDB.
+- A Back to Projects button was added in the designer top bar.
+
+Important files:
+- src/components/home/ProjectHome.tsx
+- src/components/home/NewProjectDialog.tsx
+- src/persistence/db.ts
+- src/App.tsx
+
+3. Google Maps and address workflow
+
+- A settings area was added on the project listing page for storing the Google Maps API key in localStorage.
+- The new project dialog supports Google Places address autocomplete when an API key is available.
+- The address flow can validate/select a complete address from autocomplete.
+- A map capture preview is available during project creation.
+- The map supports selecting or changing the location from the map.
+- Reverse geocoding support exists for converting a map-selected location back into an address.
+- The designer can add the captured map as a map image layer/underlay.
+- The map image is intentionally non-interactive in the designer, so it cannot be resized or dragged there.
+- Roofs can be drawn over the map image.
+- Map scale metadata is used so drawings can align more closely to actual house measurements.
+
+Important files:
+- src/services/googleMaps.ts
+- src/components/home/NewProjectDialog.tsx
+- src/cad/document/defaultDocument.ts
+- src/components/canvas/renderers/BasicRenderers.tsx
+
+API notes:
+- Currently useful Google APIs include Maps JavaScript API, Places API or Places API (New), Maps Static API, and Geocoding API.
+- Address Validation API and Solar API are enabled by the user but are not central to the current implemented flow.
+- Static Maps returns raster imagery, typically PNG or JPEG depending on the request.
+- Any image enhancement, storage, or reuse of Google map imagery should be checked against Google Maps Platform terms before production use.
+
+4. Designer top bar and navigation
+
+- The designer top bar was simplified.
+- New, Demo, and Open buttons were removed from the designer because projects are now managed from the home screen.
+- Back to Projects was moved to the right of the zoom controls.
+- Export options were grouped under a single Export dropdown.
+- Export dropdown options include:
+  - Default RufsunCAD document export.
+  - PNG export.
+  - PDF report export.
+- The project name can be edited directly in the designer top bar.
+- The favicon was added.
+
+Important files:
+- src/components/layout/TopBar.tsx
+- public/favicon.svg
+- index.html
+
+5. Toolbar and drawing tools
+
+- The left toolbar was simplified to only the main tools requested:
+  - Select tool.
+  - Roof tool.
+  - Solar tool.
+  - Text tool.
+- Extra tools were removed from the visible toolbar.
+- The roof and solar icons were repositioned according to the requested toolbar order.
+
+Important file:
+- src/components/layout/LeftToolbar.tsx
+
+6. Roof drawing behavior
+
+- Roof drawing now uses one main roof tool.
+- Roofs are drawn by placing connected line points.
+- When the final line meets the first point/end point, the polygon roof closes.
+- Dots/endpoints are used for line matching.
+- While drawing, the line can remain straight along horizontal/vertical paths until the pointer moves far enough away from that path.
+- Endpoint alignment guides were added so distant dots can be joined cleanly at straight 90 degree paths in X or Y.
+- Roof line measurements are shown while drawing and after drawing.
+- Measurements are formatted in feet and inches.
+- Measurement labels adjust for zoom so they stay readable and closer to the line.
+- A bug where an 18 ft x 14 ft roof could auto-resize to about 30 ft x 30 ft was fixed by removing automatic roof scale normalization.
+
+Important files:
+- src/components/canvas/CadCanvas.tsx
+- src/components/canvas/renderers/BasicRenderers.tsx
+- src/cad/geometry/geometry.ts
+
+7. Solar panel behavior
+
+- Solar panel dragging and placement were improved.
+- Panel placement snaps to the configured grid.
+- Panels can snap/align more predictably when brought together.
+- Panel overlap checks prevent placing a panel where another panel already occupies space.
+- When an invalid placement is attempted, the app can show a toast warning.
+- Solar tools now support:
+  - Manual panel placement.
+  - Create Grid.
+  - Auto Fill Roof.
+- Create Grid and Auto Fill Roof are only shown when the active tool is Solar.
+- Solar layout controls were made smaller/medium size as requested.
+- The panel selector input text was reduced to 12px.
+- Auto Fill Roof can populate a selected roof area with panels while skipping occupied spaces.
+- Grid generation can create panel arrays on a selected roof and also skips occupied spaces.
+
+Important files:
+- src/components/panels/PropertiesPanel.tsx
+- src/components/canvas/CadCanvas.tsx
+- src/cad/geometry/geometry.ts
+- src/cad/solar/panels.ts
+
+8. Layers and selection behavior
+
+- Layer controls exist in the right panel.
+- Objects respect visible, locked, and active layer behavior in selection/deletion flows.
+- Marquee selection was adjusted so selecting panels on a different layer does not also select the roof underneath.
+- Map images are treated as underlay objects and are not selectable/resizable in the designer.
+- The default document includes separate layers such as map, roof, solar, dimensions, annotations, and general.
+
+Important files:
+- src/store/useCadStore.ts
+- src/components/canvas/CadCanvas.tsx
+- src/cad/document/defaultDocument.ts
+
+9. Grid, zoom, and canvas performance
+
+- Zoom behavior was adjusted to stay smooth with the mouse wheel.
+- The delayed zoom behavior was reverted toward immediate wheel-based zoom.
+- Zoom performance was improved for cases where panels are present.
+- Grid notation clutter at very low zoom levels was reduced.
+- Grid rendering is separated from object rendering.
+- The canvas includes object, draft/marquee, transformer, and grid layers.
+
+Important files:
+- src/components/canvas/CadCanvas.tsx
+- src/components/canvas/GridLayer.tsx
+
+10. Export behavior
+
+- PNG export now adds a pure white background before exporting.
+- PNG export excludes the grid so printed/exported images do not include grid lines.
+- PDF export was improved to keep the drawing on the left and analysis numbers on the right.
+- The drawing is not squeezed in the PDF report; aspect ratio fitting is used.
+- The spacing between report data lines was reduced for a more compact right-side report.
+- The PDF report includes analysis data.
+- The PDF report includes a system cost estimate so cost and savings can be compared side by side.
+
+Important files:
+- src/components/layout/TopBar.tsx
+- src/components/analysis/EnergyAnalysisPanel.tsx
+- src/cad/energy/energyCalculator.ts
+
+11. Energy analysis and system cost
+
+- An Analysis view exists in the designer.
+- Energy calculations estimate:
+  - System size.
+  - Production.
+  - Savings/revenue.
+  - Performance values.
+  - Cost estimate.
+  - Payback-style comparison values.
+- The system cost estimate can be compared with savings in the analysis panel and PDF export.
+
+Important files:
+- src/components/analysis/EnergyAnalysisPanel.tsx
+- src/cad/energy/energyCalculator.ts
+
+12. Project sidebar and properties panel
+
+- The right designer panel includes a Project section with improved presentation.
+- It shows project/customer context and design metrics.
+- The Layers section text was reduced in size.
+- Solar layout tools only appear when using the Solar tool.
+- Object-specific properties are shown depending on the selected object type.
+
+Important file:
+- src/components/panels/PropertiesPanel.tsx
+
+13. Styling and visual updates
+
+- Font was changed to Poppins.
+- Navbar controls to the right of the logo were made smaller.
+- Footer/status text was reduced.
+- The favicon was added.
+- Home screen, project table, settings panel, map preview, dialog, export menu, toast, and right panel styles were added or refined.
+
+Important files:
+- src/styles.css
+- public/favicon.svg
+- index.html
+
+14. Current important behavior notes
+
+- The browser database is local IndexedDB, not a cloud database.
+- Google Maps API key is stored in browser localStorage for this prototype.
+- The captured map is used as a calibrated raster underlay, not as an editable vector map.
+- The designer does not store the actual Google API key inside project documents.
+- Map image rendering depends on Google Static Maps and the browser being allowed to load the image.
+- Reverse geocoding requires Geocoding API to be enabled.
+- Address autocomplete requires the correct Places API setup and billing permissions.
+- Production usage should review Google Maps licensing, especially if enhancing, storing, exporting, or reusing map imagery.
+
+15. Main user requests already addressed
+
+- Stabilized solar panel dragging and snapping.
+- Removed grid from PNG/PDF-style export output.
+- Added white background to PNG export.
+- Added panel overlap prevention.
+- Improved layer-aware selection.
+- Changed font to Poppins.
+- Simplified roof drawing into a single roof tool.
+- Added feet/inches line measurements.
+- Improved straight-line drawing guidance.
+- Improved zoom behavior and low-zoom grid notation.
+- Simplified designer toolbar and top bar.
+- Added project list home screen.
+- Added local project database.
+- Added project delete confirmation.
+- Added editable project name.
+- Added export dropdown.
+- Added favicon.
+- Added map/address workflow using Google APIs.
+- Made map image non-resizable/non-interactive inside designer.
+- Allowed roof drawing over the map layer.
+- Fixed unwanted roof auto-resizing.

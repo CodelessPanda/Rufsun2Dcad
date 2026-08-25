@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Layer, Rect, Stage, Transformer } from "react-konva";
 import type Konva from "konva";
 import { useCadStore } from "../../store/useCadStore";
-import type { CadObject, Point, SolarPanelObject } from "../../types/cad";
+import type { CadObject, Point, RoofObject, SolarPanelObject } from "../../types/cad";
 import { clampScale, screenToWorld, zoomAroundPoint } from "../../cad/viewport/viewport";
-import { getBoundingBox, rectanglesOverlap, panelOverlapsExisting } from "../../cad/geometry/geometry";
+import { getBoundingBox, rectanglesOverlap, panelOverlapsExisting, pointInsidePolygon } from "../../cad/geometry/geometry";
 import { calculateSnap, snapPanelToPanels, snapToGrid } from "../../cad/snapping/snapping";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import {
@@ -21,13 +21,16 @@ import {
 import { GridLayer } from "./GridLayer";
 import { DraftLayer } from "./DraftLayer";
 import { CadObjectRenderer } from "./renderers/CadObjectRenderer";
+import { SolarExposureLayer } from "./SolarExposureLayer";
+import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
 
 interface Props {
   stageRef: RefObject<Konva.Stage>;
   readOnly?: boolean;
+  solarExposure?: ProjectSolarDataState;
 }
 
-export function CadCanvas({ stageRef, readOnly = false }: Props) {
+export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodesRef = useRef<Record<string, Konva.Node | null>>({});
@@ -75,6 +78,14 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
         .sort((a, b) => a.zIndex - b.zIndex),
     [document.objects, layersById]
   );
+  const selectedObjects = useMemo(
+    () => selectedIds.map((id) => document.objects.find((object) => object.id === id)).filter(Boolean) as CadObject[],
+    [document.objects, selectedIds]
+  );
+  const selectedPanelsOnly = selectedObjects.length > 0 && selectedObjects.every((object) => object.type === "solarPanel");
+  const roofs = useMemo(() => visibleObjects.filter((object): object is RoofObject => object.type === "roof"), [visibleObjects]);
+  const mapObjects = useMemo(() => visibleObjects.filter((object) => object.type === "mapImage"), [visibleObjects]);
+  const foregroundObjects = useMemo(() => visibleObjects.filter((object) => object.type !== "mapImage"), [visibleObjects]);
 
   useEffect(() => {
     viewportRef.current = viewport;
@@ -209,7 +220,11 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
     if (activeTool === "solar") {
       const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
       const point = document.settings.snap.grid ? snapToGrid(world, document.settings.grid.minor) : world;
+      const roof = document.objects
+        .filter((object): object is Extract<CadObject, { type: "roof" }> => object.type === "roof")
+        .find((candidate) => pointInsidePolygon(point, candidate.points));
       const panel = createSolarPanel(point, module, getPreferredLayerId("solar", document.settings.activeLayerId, document.layers), nextZ(document.objects));
+      panel.rotation = roof?.azimuth ?? panel.rotation;
       const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
       if (panelOverlapsExisting(panel, existingPanels)) {
         showToast("Cannot place panel here — space is occupied");
@@ -402,11 +417,21 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
   const handleTransformEnd = (id: string, node: Konva.Node) => {
     const object = document.objects.find((item) => item.id === id);
     if (!object) return;
+    if (object.type === "solarPanel") {
+      node.scale({ x: 1, y: 1 });
+      node.rotation(object.rotation);
+      updateObject(id, {
+        x: node.x(),
+        y: node.y(),
+        rotation: object.rotation
+      } as Partial<CadObject>);
+      return;
+    }
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
     node.scale({ x: 1, y: 1 });
 
-    if (object.type === "rectangle" || object.type === "solarPanel" || object.type === "mapImage") {
+    if (object.type === "rectangle" || object.type === "mapImage") {
       updateObject(id, {
         x: node.x(),
         y: node.y(),
@@ -472,17 +497,39 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
           <GridLayer width={size.width} height={size.height} viewport={viewport} grid={document.settings.grid} />
         </Layer>
         <Layer>
-          {visibleObjects.map((object) => {
+          {mapObjects.map((object) => {
             const layer = layersById.get(object.layerId);
             const locked = object.locked || layer?.locked;
-            const isMapImage = object.type === "mapImage";
             return (
               <CadObjectRenderer
                 key={object.id}
                 object={object}
-                selected={!isMapImage && selectedIds.includes(object.id)}
-                draggable={!isMapImage && !readOnly && activeTool === "select" && !locked}
-                listening={!isMapImage && (readOnly || activeTool !== "select" || object.layerId === document.settings.activeLayerId)}
+                selected={false}
+                draggable={false}
+                listening={false}
+                scale={viewport.scale}
+                registerNode={(id, node) => {
+                  nodesRef.current[id] = node;
+                }}
+                onSelect={handleObjectSelect}
+                onDragStart={handleDragStart}
+                onDragMove={handleDragMove}
+                onDragEnd={handleDragEnd}
+                onTransformEnd={handleTransformEnd}
+              />
+            );
+          })}
+          {solarExposure && <SolarExposureLayer solarExposure={solarExposure} roofs={roofs} />}
+          {foregroundObjects.map((object) => {
+            const layer = layersById.get(object.layerId);
+            const locked = object.locked || layer?.locked;
+            return (
+              <CadObjectRenderer
+                key={object.id}
+                object={object}
+                selected={selectedIds.includes(object.id)}
+                draggable={!readOnly && activeTool === "select" && !locked}
+                listening={readOnly || activeTool !== "select" || object.layerId === document.settings.activeLayerId}
                 scale={viewport.scale}
                 registerNode={(id, node) => {
                   nodesRef.current[id] = node;
@@ -514,7 +561,8 @@ export function CadCanvas({ stageRef, readOnly = false }: Props) {
         <Layer>
           <Transformer
             ref={transformerRef}
-            rotateEnabled
+            rotateEnabled={!selectedPanelsOnly}
+            enabledAnchors={selectedPanelsOnly ? [] : undefined}
             keepRatio={false}
             ignoreStroke
             boundBoxFunc={(_, nextBox) => ({
