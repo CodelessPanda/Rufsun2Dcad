@@ -403,10 +403,9 @@ button {
   stroke-width: 2;
 }
 
-.editor-command-set {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+.header-dropdowns {
+  padding-right: 8px;
+  border-right: 1px solid #d9dde3;
 }
 
 .brand {
@@ -508,17 +507,63 @@ button {
   height: 12px;
 }
 
+.menu-strip button.export-trigger {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid #d8dee6;
+  color: #253246;
+  background: #f8fafc;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
+}
+
+.menu-strip button.export-trigger:hover {
+  border-color: #c5cfdb;
+  background: #eef4f8;
+}
+
+.menu-strip button.icon-trigger {
+  min-width: 46px;
+  justify-content: center;
+}
+
 .export-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 30;
-  min-width: 168px;
+  position: fixed;
+  z-index: 100;
+  min-width: min(168px, calc(100vw - 16px));
   padding: 6px;
   border: 1px solid #d8dee6;
   border-radius: 6px;
   background: #ffffff;
   box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-dropdown {
+  min-width: min(260px, calc(100vw - 16px));
+}
+
+.solar-settings-dropdown {
+  min-width: min(360px, calc(100vw - 16px));
+}
+
+.settings-dropdown h3,
+.solar-settings-dropdown h3 {
+  margin: 4px 6px 8px;
+  color: #253246;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.settings-dropdown .field,
+.settings-dropdown .toggle-row,
+.solar-settings-dropdown .field,
+.solar-settings-dropdown .toggle-row,
+.solar-settings-dropdown .stat-row {
+  grid-template-columns: minmax(108px, 1fr) minmax(96px, 1fr);
+  min-height: 28px;
+  padding: 0 4px;
 }
 
 .export-dropdown button {
@@ -534,19 +579,21 @@ button {
   background: #f1f5f9;
 }
 
-.topbar-spacer {
-  flex: 1;
+.solar-settings-dropdown .solar-exposure-box {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
-.zoom-pill {
-  min-width: 88px;
-  padding: 5px 8px;
-  border: 1px solid #dde3ea;
-  border-radius: 5px;
-  color: #475569;
-  background: #f8fafc;
-  font-size: 12px;
-  text-align: center;
+.solar-settings-dropdown .layout-actions button,
+.solar-settings-dropdown .alignment-nudge-grid button,
+.solar-settings-dropdown .primary-action,
+.solar-settings-dropdown .secondary-action {
+  justify-content: center;
+}
+
+.topbar-spacer {
+  flex: 1;
 }
 
 .editor-grid {
@@ -753,10 +800,15 @@ button {
   accent-color: #16855f;
 }
 
+.toggle-row.disabled {
+  opacity: 0.48;
+}
+
 .stat-row strong {
   color: #1f2937;
   font-weight: 700;
   text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .stats .stat-row {
@@ -1017,46 +1069,6 @@ button {
   .menu-strip button {
     padding: 0 6px;
   }
-}
-
-/* View Switcher Styles */
-.view-switcher {
-  display: flex;
-  gap: 4px;
-  padding: 0 8px;
-  border-left: 1px solid #d9dde3;
-  border-right: 1px solid #d9dde3;
-}
-
-.view-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 5px;
-  color: #475569;
-  background: transparent;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.view-btn:hover {
-  background: #f1f5f9;
-  color: #334155;
-}
-
-.view-btn.active {
-  color: #ffffff;
-  background: #16855f;
-}
-
-.view-btn svg {
-  width: 14px;
-  height: 14px;
-  stroke-width: 2;
 }
 
 /* Energy Analysis Styles */
@@ -1366,6 +1378,18 @@ button {
   cursor: pointer;
 }
 
+.mode-tool-button {
+  color: #334155;
+  background: #f8fafc;
+}
+
+.tool-divider {
+  width: 30px;
+  height: 1px;
+  margin: 2px 0;
+  background: #d9dde3;
+}
+
 .auth-primary:hover {
   background: #11694b;
 }
@@ -1533,6 +1557,43 @@ button {
   color: #64748b;
   font-size: 10px;
   font-style: normal;
+}
+
+.solar-debug-panel {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e0e7ef;
+  border-radius: 6px;
+  background: #fbfcfd;
+}
+
+.solar-debug-panel summary {
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.alignment-nudge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+
+.alignment-nudge-grid button {
+  min-height: 26px;
+  border-radius: 5px;
+  color: #315b8f;
+  background: #eff6ff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.alignment-nudge-grid button:first-child,
+.alignment-nudge-grid button:last-child {
+  grid-column: 2;
 }
 
 .side-nav {
@@ -1877,8 +1938,28 @@ button {
 }
 
 .settings-form {
+  display: grid;
+  gap: 12px;
   max-width: 720px;
   padding: 16px;
+}
+
+.settings-subsection {
+  display: grid;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #e6eaf0;
+}
+
+.settings-subsection h2 {
+  margin: 0;
+  color: #253246;
+  font-size: 14px;
+}
+
+.settings-toggle-row {
+  max-width: 320px;
 }
 
 .settings-save {

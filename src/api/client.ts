@@ -189,7 +189,11 @@ export const api = {
     });
   },
   async solarAnnualFluxTiff(workspaceId: string, projectId: string, googleApiKey?: string) {
-    const response = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects/${projectId}/solar/annual-flux.tiff`, {
+    return this.solarLayerTiff(workspaceId, projectId, "annual-flux", googleApiKey);
+  },
+  async solarLayerTiff(workspaceId: string, projectId: string, layer: "annual-flux" | "rgb" | "dsm" | "mask", googleApiKey?: string) {
+    const path = layer === "annual-flux" ? "annual-flux.tiff" : `layers/${layer}.tiff`;
+    const response = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects/${projectId}/solar/${path}`, {
       credentials: "include",
       headers: {
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

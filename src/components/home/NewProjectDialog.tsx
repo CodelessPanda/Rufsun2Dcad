@@ -6,6 +6,7 @@ import {
   loadGoogleMaps,
   normalizeMapCapture,
   reverseGeocode,
+  setCadMapMode,
   type GoogleAutocomplete,
   type GoogleMap,
   type GoogleMarker,
@@ -130,11 +131,15 @@ export function NewProjectDialog({
           zoom: mapCapture?.zoom ?? 20,
           mapTypeId: "satellite",
           streetViewControl: false,
-          fullscreenControl: false
+          fullscreenControl: false,
+          rotateControl: false,
+          tilt: 0,
+          heading: 0
         });
       mapInstanceRef.current = map;
       map.setCenter(position);
       map.setZoom(mapCapture?.zoom ?? 20);
+      setCadMapMode(map);
 
       const isNewMarker = !markerRef.current;
       const marker =

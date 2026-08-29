@@ -12,7 +12,9 @@
     "server:build": "npm --prefix server run build",
     "server:test": "npm --prefix server run test",
     "server:migrate": "npm --prefix server run prisma:migrate",
-    "server:seed": "npm --prefix server run prisma:seed"
+    "server:seed": "npm --prefix server run prisma:seed",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",

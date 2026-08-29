@@ -13,11 +13,16 @@ type GoogleMapsNamespace = {
         mapTypeId?: string;
         streetViewControl?: boolean;
         fullscreenControl?: boolean;
+        rotateControl?: boolean;
+        tilt?: number;
+        heading?: number;
       }
     ) => {
       addListener: (eventName: "click", handler: (event: { latLng?: GoogleLatLng }) => void) => void;
       setCenter: (position: { lat: number; lng: number }) => void;
       setZoom: (zoom: number) => void;
+      setTilt?: (tilt: number) => void;
+      setHeading?: (heading: number) => void;
     };
     Marker: new (
       options: {
@@ -156,6 +161,11 @@ export function placeFromLatLng(latitude: number, longitude: number, formattedAd
       }
     }
   };
+}
+
+export function setCadMapMode(map: GoogleMap) {
+  map.setTilt?.(0);
+  map.setHeading?.(0);
 }
 
 export async function reverseGeocode(apiKey: string, latitude: number, longitude: number): Promise<GooglePlace> {

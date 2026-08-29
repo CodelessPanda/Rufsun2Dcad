@@ -4,37 +4,18 @@ import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
 import type { CadObject, RoofObject, SolarPanelObject } from "../../types/cad";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle, getBoundingBox, roofContainsPanel, panelOverlapsExisting, rotatePoint } from "../../cad/geometry/geometry";
+import { formatMetric, polygonArea, distance, angle, getBoundingBox, panelOverlapsExisting, pointInsidePolygon, roofContainsPanel, rotatePoint } from "../../cad/geometry/geometry";
 import { createSolarPanel, nextZ } from "../../cad/objects/factory";
-import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
-import { SolarExposurePanel } from "./SolarExposurePanel";
 
-interface PropertiesPanelProps {
-  solarExposure?: ProjectSolarDataState;
-  onLoadSolarExposure?: () => void;
-  onToggleSolarExposure?: (visible: boolean) => void;
-}
-
-export function PropertiesPanel({
-  solarExposure,
-  onLoadSolarExposure,
-  onToggleSolarExposure
-}: PropertiesPanelProps) {
+export function PropertiesPanel() {
   const document = useCadStore((state) => state.document);
   const selectedIds = useCadStore((state) => state.selectedIds);
   const activeTool = useCadStore((state) => state.activeTool);
   const updateObject = useCadStore((state) => state.updateObject);
   const addObjects = useCadStore((state) => state.addObjects);
-  const setDocument = useCadStore((state) => state.setDocument);
   const setLayer = useCadStore((state) => state.setLayer);
   const setActiveLayer = useCadStore((state) => state.setActiveLayer);
   const selectedObjects = document.objects.filter((object) => selectedIds.includes(object.id));
-  const selectedRoof = selectedObjects.length === 1 && selectedObjects[0].type === "roof" ? selectedObjects[0] : undefined;
-  const showGlobalSolarExposure =
-    solarExposure &&
-    onLoadSolarExposure &&
-    onToggleSolarExposure &&
-    selectedRoof === undefined;
 
   return (
     <aside className="properties-panel">
@@ -45,22 +26,9 @@ export function PropertiesPanel({
           object={selectedObjects[0]}
           updateObject={updateObject}
           addObjects={addObjects}
-          solarExposure={solarExposure}
-          onLoadSolarExposure={onLoadSolarExposure}
-          onToggleSolarExposure={onToggleSolarExposure}
         />
       ) : (
         <MultiSelection objects={selectedObjects} />
-      )}
-
-      {showGlobalSolarExposure && (
-        <section className="panel-section">
-          <SolarExposurePanel
-            solarExposure={solarExposure}
-            onLoad={onLoadSolarExposure}
-            onToggleVisible={onToggleSolarExposure}
-          />
-        </section>
       )}
 
       {activeTool === "solar" && <SolarLayoutTools />}
@@ -85,25 +53,6 @@ export function PropertiesPanel({
         </div>
       </section>
 
-      <section className="panel-section compact">
-        <h2>Grid</h2>
-        <Toggle label="Visible" checked={document.settings.grid.visible} onChange={(visible) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, visible } } })} />
-        <NumberField label="Minor" value={document.settings.grid.minor} suffix="mm" onCommit={(minor) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, minor } } })} />
-        <NumberField label="Major" value={document.settings.grid.major} suffix="mm" onCommit={(major) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, major } } })} />
-      </section>
-
-      <section className="panel-section compact">
-        <h2>Snapping</h2>
-        {(["enabled", "grid", "endpoints", "midpoints", "centers", "edges", "alignment"] as const).map((key) => (
-          <Toggle
-            key={key}
-            label={key[0].toUpperCase() + key.slice(1)}
-            checked={document.settings.snap[key]}
-            onChange={(checked) => setDocument({ ...document, settings: { ...document.settings, snap: { ...document.settings.snap, [key]: checked } } })}
-          />
-        ))}
-        <NumberField label="Tolerance" value={document.settings.snap.tolerancePx} suffix="px" onCommit={(tolerancePx) => setDocument({ ...document, settings: { ...document.settings, snap: { ...document.settings.snap, tolerancePx } } })} />
-      </section>
     </aside>
   );
 }
@@ -267,17 +216,11 @@ function SolarLayoutTools() {
 function SingleObject({
   object,
   updateObject,
-  addObjects,
-  solarExposure,
-  onLoadSolarExposure,
-  onToggleSolarExposure
+  addObjects
 }: {
   object: CadObject;
   updateObject: (id: string, patch: Partial<CadObject>, recordHistory?: boolean) => void;
   addObjects: (objects: CadObject[], selectIds?: string[]) => void;
-  solarExposure?: ProjectSolarDataState;
-  onLoadSolarExposure?: () => void;
-  onToggleSolarExposure?: (visible: boolean) => void;
 }) {
   const document = useCadStore((state) => state.document);
   return (
@@ -320,14 +263,6 @@ function SingleObject({
         </>
       )}
       {object.type === "roof" && <RoofProperties object={object} updateObject={updateObject} />}
-      {object.type === "roof" && solarExposure && onLoadSolarExposure && onToggleSolarExposure && (
-        <SolarExposurePanel
-          roof={object}
-          solarExposure={solarExposure}
-          onLoad={onLoadSolarExposure}
-          onToggleVisible={onToggleSolarExposure}
-        />
-      )}
       {object.type === "text" && (
         <>
           <label className="field">
@@ -563,17 +498,21 @@ function createPanelsForRoofGrid({
   seed.rotation = roof.azimuth;
   const roofBox = getBoundingBox(roof);
   const origin = { x: roofBox.x + roofBox.width / 2, y: roofBox.y + roofBox.height / 2 };
-  const localRoofPoints = roof.points.map((point) => rotatePoint(point, origin, -roof.azimuth));
+  const usableRoofPoints = insetRoofPoints(roof, 25.4);
+  const localRoofPoints = usableRoofPoints.map((point) => rotatePoint(point, origin, -roof.azimuth));
   const box = boundsFromPoints(localRoofPoints);
-  const margin = Math.max(0, roof.setback);
-  const startX = box.x + margin;
-  const startY = box.y + margin;
-  const maxX = box.x + box.width - margin - seed.width;
-  const maxY = box.y + box.height - margin - seed.height;
+  const startX = box.x;
+  const startY = box.y;
+  const maxX = box.x + box.width - seed.width;
+  const maxY = box.y + box.height - seed.height;
   const panels: SolarPanelObject[] = [];
   let skipped = 0;
   const rowLimit = Math.min(rows, 120);
   const columnLimit = Math.min(columns, 120);
+
+  if (localRoofPoints.length < 3 || maxX < startX || maxY < startY) {
+    return { panels, skipped: rowLimit * columnLimit };
+  }
 
   for (let row = 0; row < rowLimit; row += 1) {
     const y = startY + row * (seed.height + gap);
@@ -581,9 +520,19 @@ function createPanelsForRoofGrid({
     for (let column = 0; column < columnLimit; column += 1) {
       const x = startX + column * (seed.width + gap);
       if (x > maxX) break;
-      const centerWorld = rotatePoint({ x: x + seed.width / 2, y: y + seed.height / 2 }, origin, roof.azimuth);
+      const localPanelPoints = [
+        { x, y },
+        { x: x + seed.width, y },
+        { x: x + seed.width, y: y + seed.height },
+        { x, y: y + seed.height }
+      ];
+      if (!polygonFullyContainsRect(localPanelPoints, localRoofPoints)) {
+        skipped += 1;
+        continue;
+      }
+      const topLeftWorld = rotatePoint({ x, y }, origin, roof.azimuth);
       const panel = createSolarPanel(
-        { x: centerWorld.x - seed.width / 2, y: centerWorld.y - seed.height / 2 },
+        topLeftWorld,
         module,
         layerId,
         zIndexStart + panels.length,
@@ -613,6 +562,71 @@ function boundsFromPoints(points: Array<{ x: number; y: number }>) {
     width: Math.max(...xs) - x,
     height: Math.max(...ys) - y
   };
+}
+
+function insetRoofPoints(roof: RoofObject, clearance: number) {
+  const inset = Math.max(0, roof.setback) + Math.max(0, clearance);
+  if (inset <= 0) return roof.points;
+  const center = roof.points.reduce(
+    (acc, point) => ({ x: acc.x + point.x / roof.points.length, y: acc.y + point.y / roof.points.length }),
+    { x: 0, y: 0 }
+  );
+  return roof.points.map((point) => {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    const nextLength = Math.max(0, length - inset);
+    return {
+      x: center.x + (dx / length) * nextLength,
+      y: center.y + (dy / length) * nextLength
+    };
+  });
+}
+
+function polygonFullyContainsRect(rectPoints: Array<{ x: number; y: number }>, polygon: Array<{ x: number; y: number }>) {
+  if (rectPoints.some((point) => !pointInsidePolygon(point, polygon))) return false;
+  const rectEdges = polygonEdges(rectPoints);
+  const polygonEdgesList = polygonEdges(polygon);
+  return !rectEdges.some((rectEdge) =>
+    polygonEdgesList.some((polygonEdge) => segmentsIntersect(rectEdge.start, rectEdge.end, polygonEdge.start, polygonEdge.end))
+  );
+}
+
+function polygonEdges(points: Array<{ x: number; y: number }>) {
+  return points.map((point, index) => ({
+    start: point,
+    end: points[(index + 1) % points.length]
+  }));
+}
+
+function segmentsIntersect(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }, d: { x: number; y: number }) {
+  const d1 = direction(c, d, a);
+  const d2 = direction(c, d, b);
+  const d3 = direction(a, b, c);
+  const d4 = direction(a, b, d);
+
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+    return true;
+  }
+  return (
+    (Math.abs(d1) < 0.001 && pointOnSegment(a, c, d)) ||
+    (Math.abs(d2) < 0.001 && pointOnSegment(b, c, d)) ||
+    (Math.abs(d3) < 0.001 && pointOnSegment(c, a, b)) ||
+    (Math.abs(d4) < 0.001 && pointOnSegment(d, a, b))
+  );
+}
+
+function direction(a: { x: number; y: number }, b: { x: number; y: number }, c: { x: number; y: number }) {
+  return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
+}
+
+function pointOnSegment(point: { x: number; y: number }, start: { x: number; y: number }, end: { x: number; y: number }) {
+  return (
+    point.x >= Math.min(start.x, end.x) - 0.001 &&
+    point.x <= Math.max(start.x, end.x) + 0.001 &&
+    point.y >= Math.min(start.y, end.y) - 0.001 &&
+    point.y <= Math.max(start.y, end.y) + 0.001
+  );
 }
 
 function preferredSolarLayer(document: ReturnType<typeof useCadStore.getState>["document"]) {

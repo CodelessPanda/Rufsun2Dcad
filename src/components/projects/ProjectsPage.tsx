@@ -1,4 +1,4 @@
-import { FolderOpen, Plus } from "lucide-react";
+import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import type { CloudProject } from "../../api/types";
 import { PageHeader } from "../workspace/WorkspaceShell";
 
@@ -6,9 +6,10 @@ interface Props {
   projects: CloudProject[];
   onNewProject: () => void;
   onOpenProject: (projectId: string) => void;
+  onDeleteProject: (projectId: string) => void;
 }
 
-export function ProjectsPage({ projects, onNewProject, onOpenProject }: Props) {
+export function ProjectsPage({ projects, onNewProject, onOpenProject, onDeleteProject }: Props) {
   return (
     <section className="saas-page">
       <PageHeader
@@ -52,6 +53,18 @@ export function ProjectsPage({ projects, onNewProject, onOpenProject }: Props) {
                   <td className="project-actions">
                     <button onClick={() => onOpenProject(project.id)}>
                       <FolderOpen /> Open
+                    </button>
+                    <button
+                      className="danger"
+                      title="Delete project"
+                      aria-label={`Delete ${project.name}`}
+                      onClick={() => {
+                        if (window.confirm(`Delete "${project.name}"? This will remove it from your project list.`)) {
+                          onDeleteProject(project.id);
+                        }
+                      }}
+                    >
+                      <Trash2 />
                     </button>
                   </td>
                 </tr>

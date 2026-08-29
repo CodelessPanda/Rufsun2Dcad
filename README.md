@@ -33,15 +33,26 @@ If `VITE_API_URL` is not set, the frontend uses `http://localhost:4000/api`.
 
 The backend lives in `server/` and uses NestJS, Prisma, and PostgreSQL.
 
-1. Create a PostgreSQL database, for example `rufsun_cad`.
-2. Copy the backend env example:
+1. Start PostgreSQL. For local development with Docker Desktop:
+
+```bash
+npm run db:up
+```
+
+This starts a `rufsun_cad` PostgreSQL database on `localhost:5432` using the same username/password as the default `.env.example`.
+
+If Docker says it cannot connect to the Docker API, open Docker Desktop first and wait until it says the engine is running.
+
+2. Or create/start your own PostgreSQL database named `rufsun_cad`.
+
+3. Copy the backend env example:
 
 ```bash
 cd server
 copy .env.example .env
 ```
 
-3. Edit `server/.env`:
+4. Edit `server/.env`:
 
 ```env
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/rufsun_cad?schema=public"
@@ -53,7 +64,7 @@ GOOGLE_MAPS_BROWSER_KEY=""
 GOOGLE_SOLAR_API_KEY=""
 ```
 
-4. Install and initialize:
+5. Install and initialize:
 
 ```bash
 cd server

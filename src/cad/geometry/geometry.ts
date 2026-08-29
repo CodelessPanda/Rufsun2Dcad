@@ -15,6 +15,8 @@ export interface BoundingBox {
   height: number;
 }
 
+export const PANEL_SETBACK_CLEARANCE_MM = 25.4;
+
 export function distance(a: Point, b: Point): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
@@ -135,13 +137,13 @@ export function boundsFromPoints(points: Point[]): BoundingBox {
 }
 
 export function rectCorners(x: number, y: number, width: number, height: number, rotation = 0): Point[] {
-  const center = { x: x + width / 2, y: y + height / 2 };
+  const origin = { x, y };
   return [
     { x, y },
     { x: x + width, y },
     { x: x + width, y: y + height },
     { x, y: y + height }
-  ].map((point) => rotatePoint(point, center, rotation));
+  ].map((point) => rotatePoint(point, origin, rotation));
 }
 
 function rotatedRectBounds(x: number, y: number, width: number, height: number, rotation = 0): BoundingBox {
@@ -236,16 +238,35 @@ export function formatFeetInches(mm: number): string {
   return `${feet} ft ${inches} in`;
 }
 
-export function roofContainsPanel(panel: SolarPanelObject, roofs: RoofObject[]): boolean {
-  if (roofs.length === 0) return true;
-  const corners = rectCorners(panel.x, panel.y, panel.width, panel.height, panel.rotation);
-  return roofs.some((roof) => corners.every((corner) => pointInsidePolygon(corner, roof.points)));
+export function roofUsablePolygon(roof: RoofObject, clearance = 0): Point[] {
+  const inset = Math.max(0, roof.setback) + Math.max(0, clearance);
+  if (inset <= 0) return roof.points;
+  const center = roof.points.reduce(
+    (acc, point) => ({ x: acc.x + point.x / roof.points.length, y: acc.y + point.y / roof.points.length }),
+    { x: 0, y: 0 }
+  );
+  return roof.points.map((point) => {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    const length = Math.max(1, Math.hypot(dx, dy));
+    const nextLength = Math.max(0, length - inset);
+    return {
+      x: center.x + (dx / length) * nextLength,
+      y: center.y + (dy / length) * nextLength
+    };
+  });
 }
 
-export function findContainingRoof(panel: SolarPanelObject, roofs: RoofObject[]): RoofObject | undefined {
+export function roofContainsPanel(panel: SolarPanelObject, roofs: RoofObject[], clearance = PANEL_SETBACK_CLEARANCE_MM): boolean {
+  if (roofs.length === 0) return true;
+  const corners = rectCorners(panel.x, panel.y, panel.width, panel.height, panel.rotation);
+  return roofs.some((roof) => polygonFullyContainsRect(corners, roofUsablePolygon(roof, clearance)));
+}
+
+export function findContainingRoof(panel: SolarPanelObject, roofs: RoofObject[], clearance = PANEL_SETBACK_CLEARANCE_MM): RoofObject | undefined {
   if (roofs.length === 0) return undefined;
   const corners = rectCorners(panel.x, panel.y, panel.width, panel.height, panel.rotation);
-  return roofs.find((roof) => corners.every((corner) => pointInsidePolygon(corner, roof.points)));
+  return roofs.find((roof) => polygonFullyContainsRect(corners, roofUsablePolygon(roof, clearance)));
 }
 
 export function panelOverlapsExisting(panel: SolarPanelObject, existing: SolarPanelObject[]): boolean {
@@ -254,5 +275,50 @@ export function panelOverlapsExisting(panel: SolarPanelObject, existing: SolarPa
     if (other.id === panel.id) return false;
     return rectanglesOverlap(a, getBoundingBox(other));
   });
+}
+
+function polygonFullyContainsRect(rectPoints: Point[], polygon: Point[]) {
+  if (rectPoints.some((point) => !pointInsidePolygon(point, polygon))) return false;
+  const rectEdges = polygonEdges(rectPoints);
+  const polygonEdgesList = polygonEdges(polygon);
+  return !rectEdges.some((rectEdge) =>
+    polygonEdgesList.some((polygonEdge) => segmentsIntersect(rectEdge.start, rectEdge.end, polygonEdge.start, polygonEdge.end))
+  );
+}
+
+function polygonEdges(points: Point[]) {
+  return points.map((point, index) => ({
+    start: point,
+    end: points[(index + 1) % points.length]
+  }));
+}
+
+function segmentsIntersect(a: Point, b: Point, c: Point, d: Point) {
+  const d1 = direction(c, d, a);
+  const d2 = direction(c, d, b);
+  const d3 = direction(a, b, c);
+  const d4 = direction(a, b, d);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+    return true;
+  }
+  return (
+    (Math.abs(d1) < 0.001 && pointOnSegment(a, c, d)) ||
+    (Math.abs(d2) < 0.001 && pointOnSegment(b, c, d)) ||
+    (Math.abs(d3) < 0.001 && pointOnSegment(c, a, b)) ||
+    (Math.abs(d4) < 0.001 && pointOnSegment(d, a, b))
+  );
+}
+
+function direction(a: Point, b: Point, c: Point) {
+  return (c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x);
+}
+
+function pointOnSegment(point: Point, start: Point, end: Point) {
+  return (
+    point.x >= Math.min(start.x, end.x) - 0.001 &&
+    point.x <= Math.max(start.x, end.x) + 0.001 &&
+    point.y >= Math.min(start.y, end.y) - 0.001 &&
+    point.y <= Math.max(start.y, end.y) + 0.001
+  );
 }
 

@@ -21,12 +21,18 @@ import { WorkspaceOnboarding } from "./components/workspace/WorkspaceOnboarding"
 import { type AppView, WorkspaceShell } from "./components/workspace/WorkspaceShell";
 import { WorkspaceSettingsPage } from "./components/workspace/WorkspaceSettingsPage";
 import { createBlankDocument } from "./cad/document/defaultDocument";
-import { cacheCloudProject, listProjects, loadProject, saveProject, type SavedProject } from "./persistence/db";
+import { cacheCloudProject, deleteProject as deleteLocalProject, listProjects, loadProject, saveProject, type SavedProject } from "./persistence/db";
 import { documentSchema } from "./schemas/documentSchema";
 import { useCadStore } from "./store/useCadStore";
 import type { ProjectSolarDataState } from "./cad/solar/solarExposureTypes";
-import { loadProjectSolarExposure } from "./services/googleSolar";
-import type { MapCaptureSettings, RufsunCadDocument } from "./types/cad";
+import {
+  applySolarRegistrationToState,
+  DEFAULT_SOLAR_DEBUG_LAYERS,
+  loadProjectSolarExposure,
+  updateSolarDebugLayers
+} from "./services/googleSolar";
+import { normalizeSolarRegistration } from "./cad/solar/solarGeoTransform";
+import type { MapCaptureSettings, RufsunCadDocument, SolarRegistration } from "./types/cad";
 
 export type ViewMode = "editor" | "energy";
 type AuthMode = "login" | "register";
@@ -67,7 +73,12 @@ export function App() {
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [projectBusy, setProjectBusy] = useState(false);
   const [cloudSaveStatus, setCloudSaveStatus] = useState<CloudSaveStatus>("idle");
-  const [solarExposure, setSolarExposure] = useState<ProjectSolarDataState>({ status: "idle", visible: true, opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY });
+  const [solarExposure, setSolarExposure] = useState<ProjectSolarDataState>({
+    status: "idle",
+    visible: true,
+    opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY,
+    debugLayers: DEFAULT_SOLAR_DEBUG_LAYERS
+  });
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState(() => localStorage.getItem("rufsun.googleMapsApiKey") ?? "");
   const [panelWidth, setPanelWidth] = useState(() => {
@@ -326,7 +337,13 @@ export function App() {
       });
       setDocument(cadDocument, false);
       setActiveProjectId(project.id);
-      setSolarExposure({ status: "idle", visible: true, opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY });
+      setSolarExposure({
+        status: "idle",
+        visible: true,
+        opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY,
+        debugLayers: DEFAULT_SOLAR_DEBUG_LAYERS,
+        registration: cadDocument.solarRegistration
+      });
       setViewMode("editor");
       setCloudSaveStatus("saved");
       setAppView("designer");
@@ -349,7 +366,13 @@ export function App() {
       setDocument(parsed.data, false);
       await cacheCloudProject(activeWorkspaceId, projectId, parsed.data, { cloudSavedAt: cloudDocument.updatedAt });
       setActiveProjectId(projectId);
-      setSolarExposure({ status: "idle", visible: true, opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY });
+      setSolarExposure({
+        status: "idle",
+        visible: true,
+        opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY,
+        debugLayers: DEFAULT_SOLAR_DEBUG_LAYERS,
+        registration: parsed.data.solarRegistration
+      });
       setViewMode("editor");
       setCloudSaveStatus("saved");
       setAppView("designer");
@@ -358,12 +381,33 @@ export function App() {
       if (localDocument) {
         setDocument(localDocument, false);
         setActiveProjectId(projectId);
-        setSolarExposure({ status: "idle", visible: true, opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY });
+        setSolarExposure({
+          status: "idle",
+          visible: true,
+          opacity: DEFAULT_SOLAR_EXPOSURE_OPACITY,
+          debugLayers: DEFAULT_SOLAR_DEBUG_LAYERS,
+          registration: localDocument.solarRegistration
+        });
         setViewMode("editor");
         setCloudSaveStatus("offline");
         setAppView("designer");
         return;
       }
+      window.alert(formatError(error));
+    }
+  };
+
+  const deleteProject = async (projectId: string) => {
+    if (!activeWorkspaceId) return;
+    try {
+      await api.archiveProject(activeWorkspaceId, projectId);
+      await deleteLocalProject(projectId);
+      if (activeProjectId === projectId) {
+        setActiveProjectId(null);
+        setAppView("projects");
+      }
+      await refreshWorkspaceData(activeWorkspaceId);
+    } catch (error) {
       window.alert(formatError(error));
     }
   };
@@ -429,7 +473,8 @@ export function App() {
           projectId: activeProjectId,
           mapCapture: document.mapCapture,
           opacity,
-          googleApiKey: googleMapsApiKey
+          googleApiKey: googleMapsApiKey,
+          registration: document.solarRegistration
         })
       );
     } catch (error) {
@@ -439,6 +484,20 @@ export function App() {
         error: formatError(error)
       }));
     }
+  };
+
+  const updateSolarRegistration = (patch: Partial<SolarRegistration>, calibrated = false) => {
+    const currentRegistration = normalizeSolarRegistration({
+      ...document.solarRegistration,
+      ...solarExposure.registration
+    });
+    const nextRegistration = normalizeSolarRegistration({
+      ...currentRegistration,
+      ...patch,
+      calibrated: Object.prototype.hasOwnProperty.call(patch, "calibrated") ? Boolean(patch.calibrated) : calibrated || currentRegistration.calibrated
+    });
+    setDocument({ ...document, solarRegistration: nextRegistration });
+    setSolarExposure((current) => applySolarRegistrationToState(current, document.mapCapture, nextRegistration));
   };
 
   const startResize = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -482,30 +541,28 @@ export function App() {
         <div className="app-shell">
           <TopBar
             stageRef={stageRef}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
             onShowProjects={() => {
               setAppView("projects");
               void refreshWorkspaceData(activeWorkspace.id);
             }}
             cloudSaveStatus={cloudSaveStatus}
             solarExposure={solarExposure}
+            onLoadSolarExposure={() => void loadSolarExposure()}
+            onToggleSolarExposure={(visible) => setSolarExposure((current) => ({ ...current, visible }))}
+            onUpdateSolarDebugLayers={(patch) => setSolarExposure((current) => updateSolarDebugLayers(current, patch))}
+            onUpdateSolarRegistration={updateSolarRegistration}
           />
           <main className="editor-grid" style={{ "--panel-width": `${panelWidth}px` } as CSSProperties}>
             {viewMode === "editor" ? (
               <>
-                <LeftToolbar />
+                <LeftToolbar viewMode={viewMode} setViewMode={setViewMode} />
                 <CadCanvas stageRef={stageRef} solarExposure={solarExposure} />
                 <div className="panel-resize-handle" onMouseDown={startResize} />
-                <PropertiesPanel
-                  solarExposure={solarExposure}
-                  onLoadSolarExposure={() => void loadSolarExposure()}
-                  onToggleSolarExposure={(visible) => setSolarExposure((current) => ({ ...current, visible }))}
-                />
+                <PropertiesPanel />
               </>
             ) : (
               <>
-                <div className="left-toolbar" />
+                <LeftToolbar viewMode={viewMode} setViewMode={setViewMode} />
                 <CadCanvas stageRef={stageRef} readOnly solarExposure={solarExposure} />
                 <div className="panel-resize-handle" onMouseDown={startResize} />
                 <EnergyAnalysisPanel solarExposure={solarExposure} />
@@ -568,7 +625,12 @@ export function App() {
         )}
         {appView === "projects" && (
           <>
-            <ProjectsPage projects={projects} onNewProject={() => openNewProject()} onOpenProject={(id) => void openCloudProject(id)} />
+            <ProjectsPage
+              projects={projects}
+              onNewProject={() => openNewProject()}
+              onOpenProject={(id) => void openCloudProject(id)}
+              onDeleteProject={(id) => void deleteProject(id)}
+            />
             {localProjects.some((project) => !project.cloudProjectId) && (
               <div className="local-import-banner">
                 <span>{localProjects.filter((project) => !project.cloudProjectId).length} local-only projects are still safely stored in this browser.</span>

@@ -18,8 +18,7 @@ export function getRoofFluxStatistics(roof: RoofObject, raster: SolarFluxRaster,
 
 export function getPolygonFluxStatistics(points: Point[], raster: SolarFluxRaster, transform: SolarGeoTransform): SolarFluxStatistics | null {
   if (points.length < 3) return null;
-  const geoPoints = points.map((point) => transform.worldToGeo(point.x, point.y));
-  const pixelPoints = geoPoints.map((point) => transform.geoToRasterPixel(point.latitude, point.longitude));
+  const pixelPoints = points.map((point) => transform.worldToRasterPixel(point.x, point.y));
   const xs = pixelPoints.map((point) => point.x);
   const ys = pixelPoints.map((point) => point.y);
   const minX = Math.max(0, Math.floor(Math.min(...xs)));
@@ -54,8 +53,8 @@ export function sampleFluxAtGeoPoint(raster: SolarFluxRaster, transform: SolarGe
 }
 
 export function sampleFluxAtCanvasPoint(raster: SolarFluxRaster, transform: SolarGeoTransform, x: number, y: number) {
-  const geo = transform.worldToGeo(x, y);
-  return sampleFluxAtGeoPoint(raster, transform, geo.latitude, geo.longitude);
+  const pixel = transform.worldToRasterPixel(x, y);
+  return sampleFluxAtPixel(raster, pixel.x, pixel.y);
 }
 
 function round(value: number) {

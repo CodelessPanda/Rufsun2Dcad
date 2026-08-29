@@ -5,6 +5,14 @@ const pointSchema = z.object({
   y: z.number()
 });
 
+const solarRegistrationSchema = z.object({
+  eastOffsetMeters: z.number(),
+  northOffsetMeters: z.number(),
+  rotationDegrees: z.number(),
+  scale: z.number().positive(),
+  calibrated: z.boolean()
+});
+
 const baseSchema = z.object({
   id: z.string(),
   type: z.string(),
@@ -107,6 +115,7 @@ export const documentSchema = z.object({
     imageHeightPx: z.number().positive(),
     mapType: z.enum(["satellite", "roadmap", "hybrid"])
   }).optional(),
+  solarRegistration: solarRegistrationSchema.optional(),
   units: z.literal("mm"),
   objects: z.array(objectSchema),
   layers: z.array(

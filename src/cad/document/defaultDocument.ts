@@ -29,6 +29,13 @@ export function createBlankDocument(
     customerName,
     customerAddress,
     mapCapture,
+    solarRegistration: {
+      eastOffsetMeters: 0,
+      northOffsetMeters: 0,
+      rotationDegrees: 0,
+      scale: 1,
+      calibrated: false
+    },
     units: "mm",
     objects: mapCapture
       ? [

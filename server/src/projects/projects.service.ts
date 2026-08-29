@@ -120,6 +120,13 @@ function minimalDocument(name: string, customerName: string, address?: string) {
     name,
     customerName,
     customerAddress: address ?? "",
+    solarRegistration: {
+      eastOffsetMeters: 0,
+      northOffsetMeters: 0,
+      rotationDegrees: 0,
+      scale: 1,
+      calibrated: false
+    },
     units: "mm",
     objects: [],
     layers: [],

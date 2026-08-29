@@ -4,6 +4,14 @@ import { WorkspaceAccessService } from "../common/workspace-access.service";
 const SOLAR_DATA_RADIUS_METERS = 50;
 const SOLAR_PIXEL_SIZE_METERS = 0.1;
 const SOLAR_CACHE_TTL_MS = 50 * 60 * 1000;
+const SOLAR_LAYER_URL_KEYS = {
+  "annual-flux": "annualFluxUrl",
+  rgb: "rgbUrl",
+  dsm: "dsmUrl",
+  mask: "maskUrl"
+} as const;
+
+export type SolarLayerKind = keyof typeof SOLAR_LAYER_URL_KEYS;
 
 export interface SolarDataLayersResponse {
   imageryDate?: { year: number; month: number; day: number };
@@ -75,14 +83,21 @@ export class SolarService {
   }
 
   async downloadAnnualFlux(userId: string, workspaceId: string, projectId: string, clientGoogleApiKey?: string) {
+    return this.downloadLayer(userId, workspaceId, projectId, "annual-flux", clientGoogleApiKey);
+  }
+
+  async downloadLayer(userId: string, workspaceId: string, projectId: string, layer: SolarLayerKind, clientGoogleApiKey?: string) {
     const layers = await this.getRawDataLayers(userId, workspaceId, projectId, clientGoogleApiKey);
-    if (!layers.annualFluxUrl) throw new NotFoundException("Annual solar flux layer is not available for this location.");
+    const urlKey = SOLAR_LAYER_URL_KEYS[layer];
+    if (!urlKey) throw new BadRequestException("Unknown Solar layer requested.");
+    const layerUrl = layers[urlKey];
+    if (!layerUrl) throw new NotFoundException(`${layer} Solar layer is not available for this location.`);
     const apiKey = resolveGoogleSolarApiKey(clientGoogleApiKey);
 
-    const response = await fetch(prepareGeoTiffUrl(layers.annualFluxUrl, apiKey));
+    const response = await fetch(prepareGeoTiffUrl(layerUrl, apiKey));
     if (!response.ok) {
       if (response.status === 404) throw new NotFoundException("Solar exposure GeoTIFF is no longer available. Refresh solar data.");
-      throw new BadRequestException("Unable to download annual solar flux GeoTIFF.");
+      throw new BadRequestException(`Unable to download ${layer} Solar GeoTIFF.`);
     }
     const arrayBuffer = await response.arrayBuffer();
     return {
@@ -104,9 +119,15 @@ export class SolarService {
       imageryProcessedDate: data.imageryProcessedDate,
       imageryQuality: data.imageryQuality,
       hasAnnualFlux: Boolean(data.annualFluxUrl),
+      hasRgb: Boolean(data.rgbUrl),
+      hasDsm: Boolean(data.dsmUrl),
+      hasMask: Boolean(data.maskUrl),
       radiusMeters: SOLAR_DATA_RADIUS_METERS,
       pixelSizeMeters: SOLAR_PIXEL_SIZE_METERS,
       annualFluxDownloadUrl: `/api/workspaces/${workspaceId}/projects/${projectId}/solar/annual-flux.tiff`,
+      rgbDownloadUrl: data.rgbUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/rgb.tiff` : undefined,
+      dsmDownloadUrl: data.dsmUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/dsm.tiff` : undefined,
+      maskDownloadUrl: data.maskUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/mask.tiff` : undefined,
       loadedAt: new Date(loadedAt).toISOString()
     };
   }

@@ -111,9 +111,15 @@ export interface SolarDataLayers {
   imageryProcessedDate?: { year: number; month: number; day: number };
   imageryQuality?: "HIGH" | "MEDIUM" | "BASE";
   hasAnnualFlux: boolean;
+  hasRgb?: boolean;
+  hasDsm?: boolean;
+  hasMask?: boolean;
   radiusMeters: number;
   pixelSizeMeters: number;
   annualFluxDownloadUrl: string;
+  rgbDownloadUrl?: string;
+  dsmDownloadUrl?: string;
+  maskDownloadUrl?: string;
   loadedAt: string;
 }
 

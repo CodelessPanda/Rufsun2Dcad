@@ -107,6 +107,14 @@ export interface MapCaptureSettings {
   mapType: "satellite" | "roadmap" | "hybrid";
 }
 
+export interface SolarRegistration {
+  eastOffsetMeters: number;
+  northOffsetMeters: number;
+  rotationDegrees: number;
+  scale: number;
+  calibrated: boolean;
+}
+
 export interface MapImageObject extends CadObjectBase {
   type: "mapImage";
   width: number;
@@ -177,6 +185,7 @@ export interface RufsunCadDocument {
   customerName?: string;
   customerAddress?: string;
   mapCapture?: MapCaptureSettings;
+  solarRegistration?: SolarRegistration;
   units: CadUnits;
   objects: CadObject[];
   layers: CadLayer[];

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Workspace } from "../../api/types";
+import { useCadStore } from "../../store/useCadStore";
 import { PageHeader } from "./WorkspaceShell";
 
 interface Props {
@@ -11,6 +12,8 @@ interface Props {
 
 export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props) {
   const [form, setForm] = useState<Partial<Workspace>>(workspace);
+  const document = useCadStore((state) => state.document);
+  const setDocument = useCadStore((state) => state.setDocument);
 
   useEffect(() => {
     setForm(workspace);
@@ -74,6 +77,28 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
             <input value={form.country ?? ""} onChange={(event) => update("country", event.target.value)} />
           </label>
         </div>
+        <section className="settings-subsection">
+          <h2>Designer Grid</h2>
+          <Toggle
+            label="Visible"
+            checked={document.settings.grid.visible}
+            onChange={(visible) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, visible } } })}
+          />
+          <div className="form-grid-two">
+            <NumberField
+              label="Minor"
+              value={document.settings.grid.minor}
+              suffix="mm"
+              onCommit={(minor) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, minor: Math.max(1, minor) } } })}
+            />
+            <NumberField
+              label="Major"
+              value={document.settings.grid.major}
+              suffix="mm"
+              onCommit={(major) => setDocument({ ...document, settings: { ...document.settings, grid: { ...document.settings.grid, major: Math.max(1, major) } } })}
+            />
+          </div>
+        </section>
         {error && <p className="warning">{error}</p>}
         <button className="primary-action settings-save" disabled={busy || !form.name?.trim()}>
           {busy ? "Saving..." : "Save Workspace"}
@@ -81,4 +106,43 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
       </form>
     </section>
   );
+}
+
+function NumberField({ label, value, suffix, onCommit }: { label: string; value: number; suffix?: string; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(String(round(value)));
+  useEffect(() => setDraft(String(round(value))), [value]);
+  const commit = () => {
+    const parsed = Number(draft);
+    if (Number.isFinite(parsed)) onCommit(parsed);
+    else setDraft(String(round(value)));
+  };
+  return (
+    <label className="field stacked number-field">
+      <span>{label}</span>
+      <div>
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commit();
+          }}
+        />
+        {suffix && <em>{suffix}</em>}
+      </div>
+    </label>
+  );
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="toggle-row settings-toggle-row">
+      <span>{label}</span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    </label>
+  );
+}
+
+function round(value: number) {
+  return Math.round(value * 100) / 100;
 }
