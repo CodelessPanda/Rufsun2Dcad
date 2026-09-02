@@ -1,5 +1,5 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type { Prisma } from "@prisma/client";
+import type { Prisma, SeatType } from "@prisma/client";
 import { AccessControlService } from "../common/access-control.service";
 import { Permissions } from "../common/permissions";
 import { CommercialService } from "../commercial/commercial.service";
@@ -85,6 +85,7 @@ export class TenantsService {
     await this.access.requireTenantMembership(userId, tenantId, Permissions.TENANT_COMPANIES_CREATE);
     await this.ensureCompanyLimit(tenantId);
     const company = await this.createCompanyRecord(userId, tenantId, dto);
+    await this.applyInitialAllocations(userId, tenantId, company.id, dto);
     return company;
   }
 
@@ -125,10 +126,34 @@ export class TenantsService {
       city: dto.city?.trim() || undefined,
       state: dto.state?.trim() || undefined,
       postalCode: dto.postalCode?.trim() || undefined,
-      country: dto.country?.trim() || undefined
+      country: dto.country?.trim() || undefined,
+      status: dto.status,
+      archivedAt: dto.status === "archived" ? new Date() : undefined
     };
     if (dto.name) data.slug = await this.uniqueCompanySlug(company.tenantId, dto.name, companyId);
     return this.prisma.company.update({ where: { id: companyId }, data, include: { tenant: true } });
+  }
+
+  async updateTenantCompany(userId: string, tenantId: string, companyId: string, dto: UpdateWorkspaceDto) {
+    await this.access.requireTenantMembership(userId, tenantId, Permissions.TENANT_COMPANIES_UPDATE);
+    const company = await this.prisma.company.findFirst({ where: { id: companyId, tenantId } });
+    if (!company) throw new NotFoundException("Company not found in tenant");
+    const data: Prisma.CompanyUpdateInput = {
+      name: dto.name?.trim(),
+      logoUrl: dto.logoUrl?.trim() || undefined,
+      email: dto.email?.trim() || undefined,
+      phone: dto.phone?.trim() || undefined,
+      website: dto.website?.trim() || undefined,
+      address: dto.address?.trim() || undefined,
+      city: dto.city?.trim() || undefined,
+      state: dto.state?.trim() || undefined,
+      postalCode: dto.postalCode?.trim() || undefined,
+      country: dto.country?.trim() || undefined,
+      status: dto.status,
+      archivedAt: dto.status === "archived" ? new Date() : undefined
+    };
+    if (dto.name) data.slug = await this.uniqueCompanySlug(tenantId, dto.name, companyId);
+    return this.prisma.company.update({ where: { id: companyId }, data, include: { tenant: true, _count: { select: { customers: true, projects: true, members: true } } } });
   }
 
   async ensureDirectTenant() {
@@ -140,7 +165,11 @@ export class TenantsService {
   }
 
   private async createCompanyRecord(userId: string, tenantId: string, dto: CreateWorkspaceDto) {
-    const slug = await this.uniqueCompanySlug(tenantId, dto.name);
+    const slug = dto.slug?.trim() ? await this.uniqueCompanySlug(tenantId, dto.slug) : await this.uniqueCompanySlug(tenantId, dto.name);
+    const primaryAdmin = dto.primaryAdminEmail?.trim()
+      ? await this.prisma.user.findUnique({ where: { email: dto.primaryAdminEmail.trim().toLowerCase() } })
+      : null;
+    const ownerUserId = primaryAdmin?.id ?? userId;
     return this.prisma.company.create({
       data: {
         tenantId,
@@ -152,7 +181,7 @@ export class TenantsService {
         createdById: userId,
         members: {
           create: {
-            userId,
+            userId: ownerUserId,
             role: "company_owner",
             seatType: "designer",
             status: "active",
@@ -162,6 +191,22 @@ export class TenantsService {
       },
       include: { tenant: true, members: true }
     });
+  }
+
+  private async applyInitialAllocations(userId: string, tenantId: string, companyId: string, dto: CreateWorkspaceDto) {
+    const allocations: Array<[SeatType, number | undefined]> = [
+      ["designer", dto.designerAllocation],
+      ["sales", dto.salesAllocation]
+    ];
+    for (const [seatType, allocated] of allocations) {
+      if (allocated === undefined) continue;
+      const normalized = Math.max(0, Number(allocated) || 0);
+      await this.commercial.updateCompanyAllocation(userId, tenantId, companyId, {
+        seatType,
+        allocated: normalized,
+        unlimited: false
+      });
+    }
   }
 
   private async ensureTenantMembership(tenantId: string, userId: string, role: "owner" | "admin" | "billing" | "support" | "member") {

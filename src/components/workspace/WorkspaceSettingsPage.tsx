@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { Workspace } from "../../api/types";
+import type { CompanyCommercialSummary, Workspace } from "../../api/types";
 import { useCadStore } from "../../store/useCadStore";
 import { PageHeader } from "./WorkspaceShell";
 
@@ -7,10 +7,11 @@ interface Props {
   workspace: Workspace;
   busy: boolean;
   error: string;
+  licensing?: CompanyCommercialSummary | null;
   onSave: (input: Partial<Workspace>) => Promise<void>;
 }
 
-export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props) {
+export function WorkspaceSettingsPage({ workspace, busy, error, licensing, onSave }: Props) {
   const [form, setForm] = useState<Partial<Workspace>>(workspace);
   const document = useCadStore((state) => state.document);
   const setDocument = useCadStore((state) => state.setDocument);
@@ -23,7 +24,7 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
 
   return (
     <section className="saas-page">
-      <PageHeader title="Company Settings" subtitle="Basic company profile" />
+      <PageHeader title="Company Settings" subtitle="Profile, licensing, and designer defaults" />
       <form
         className="saas-panel settings-form"
         onSubmit={(event) => {
@@ -31,6 +32,10 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
           void onSave(form);
         }}
       >
+        <section className="settings-subsection">
+          <h2>Company Profile</h2>
+          <p>Business information shown across project and report workflows.</p>
+        </section>
         <label className="field stacked">
           <span>Company Name</span>
           <input value={form.name ?? ""} onChange={(event) => update("name", event.target.value)} />
@@ -78,7 +83,21 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
           </label>
         </div>
         <section className="settings-subsection">
-          <h2>Designer Grid</h2>
+          <h2>Licensing</h2>
+          <p>{licensing?.plan?.name ?? "No plan assigned"} · {licensing?.subscriptionValid ? "Active" : "Needs attention"}</p>
+          <div className="seat-card-grid">
+            {(licensing?.seats ?? []).map((seat) => (
+              <div key={seat.seatType} className="license-card">
+                <span>{seat.seatType}</span>
+                <strong>{seat.unlimited ? "Unlimited" : seat.total ?? 0}</strong>
+                <small>{seat.assigned ?? 0} assigned · {seat.available === null ? "unlimited" : `${seat.available} available`}</small>
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="settings-subsection">
+          <h2>Designer Defaults</h2>
+          <p>Default CAD grid settings used while drafting project documents.</p>
           <Toggle
             label="Visible"
             checked={document.settings.grid.visible}

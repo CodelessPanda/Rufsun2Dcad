@@ -1,10 +1,11 @@
-import { Building2, MailPlus, Plus, RefreshCw, SlidersHorizontal, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Building2, MailPlus, Plus, RefreshCw, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../../api/client";
-import type { Company, Invitation, MembershipStatus, SeatSummary, Tenant, TenantCommercialSummary, TenantMember, TenantRole } from "../../api/types";
+import type { Company, CompanyStatus, Invitation, MembershipStatus, SeatSummary, Tenant, TenantCommercialSummary, TenantMember, TenantRole } from "../../api/types";
 import { PageHeader } from "../workspace/WorkspaceShell";
 
 const TENANT_ROLES: TenantRole[] = ["owner", "admin", "billing", "support", "member"];
+const COMPANY_STATUSES: CompanyStatus[] = ["active", "suspended", "archived"];
 
 export function TenantCompaniesPage({
   tenant,
@@ -24,6 +25,10 @@ export function TenantCompaniesPage({
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [licensing, setLicensing] = useState<TenantCommercialSummary | null>(null);
+  const [tenantCompanies, setTenantCompanies] = useState<Company[]>(companies);
+  const [companySearch, setCompanySearch] = useState("");
+  const [companyStatusFilter, setCompanyStatusFilter] = useState("all");
+  const [companyDialogOpen, setCompanyDialogOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<TenantRole>("member");
 
@@ -31,7 +36,21 @@ export function TenantCompaniesPage({
     setError("");
     void loadMembers();
     void loadLicensing();
+    void loadCompanies();
   }, [tenant.id]);
+
+  useEffect(() => {
+    setTenantCompanies(companies);
+  }, [companies]);
+
+  const filteredCompanies = useMemo(() => {
+    const needle = companySearch.trim().toLowerCase();
+    return tenantCompanies.filter((company) => {
+      const matchesSearch = !needle || [company.name, company.slug, company.address ?? "", company.email ?? ""].some((value) => value.toLowerCase().includes(needle));
+      const matchesStatus = companyStatusFilter === "all" || company.status === companyStatusFilter;
+      return matchesSearch && matchesStatus;
+    });
+  }, [companySearch, companyStatusFilter, tenantCompanies]);
 
   const loadMembers = async () => {
     try {
@@ -52,15 +71,23 @@ export function TenantCompaniesPage({
     }
   };
 
-  const createCompany = async () => {
-    const name = window.prompt("Company name");
-    if (!name?.trim()) return;
+  const loadCompanies = async () => {
+    try {
+      setTenantCompanies(await api.tenantCompanies(tenant.id));
+    } catch {
+      setTenantCompanies(companies);
+    }
+  };
+
+  const createCompany = async (input: { name: string; slug?: string; primaryAdminEmail?: string; designerAllocation?: number; salesAllocation?: number }) => {
     setBusy(true);
     setError("");
     try {
-      const company = await api.createTenantCompany(tenant.id, { name: name.trim() });
+      const company = await api.createTenantCompany(tenant.id, input);
+      setCompanyDialogOpen(false);
       await onChanged();
       await loadLicensing();
+      await loadCompanies();
       onCompanyChange(company.id);
     } catch (error) {
       setError(formatError(error));
@@ -116,6 +143,22 @@ export function TenantCompaniesPage({
     }
   };
 
+  const updateCompanyStatus = async (company: Company, status: CompanyStatus) => {
+    if (status !== "active" && !window.confirm(`${statusLabel(status)} ${company.name}?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api.updateTenantCompany(tenant.id, company.id, { status });
+      await loadCompanies();
+      await loadLicensing();
+      await onChanged();
+    } catch (error) {
+      setError(formatError(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <section className="saas-page tenant-page">
       <PageHeader
@@ -123,10 +166,10 @@ export function TenantCompaniesPage({
         subtitle={`${tenant.name} companies`}
         action={
           <div className="layout-actions">
-            <button className="secondary-action" onClick={() => void onChanged()} disabled={busy}>
+            <button className="secondary-action" onClick={() => void Promise.all([onChanged(), loadCompanies(), loadLicensing()])} disabled={busy}>
               <RefreshCw /> Refresh
             </button>
-            <button className="primary-action" onClick={() => void createCompany()} disabled={busy}>
+            <button className="primary-action" onClick={() => setCompanyDialogOpen(true)} disabled={busy}>
               <Plus /> Company
             </button>
           </div>
@@ -179,6 +222,21 @@ export function TenantCompaniesPage({
         </section>
       )}
       <section className="saas-panel">
+        <div className="admin-search-row tenant-company-toolbar">
+          <label className="field search-field">
+            <Search />
+            <input value={companySearch} onChange={(event) => setCompanySearch(event.target.value)} placeholder="Search companies" />
+          </label>
+          <label className="field stacked">
+            <span>Status</span>
+            <select value={companyStatusFilter} onChange={(event) => setCompanyStatusFilter(event.target.value)}>
+              <option value="all">All Statuses</option>
+              {COMPANY_STATUSES.map((status) => (
+                <option key={status} value={status}>{statusLabel(status)}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <table className="project-table">
           <thead>
             <tr>
@@ -190,7 +248,7 @@ export function TenantCompaniesPage({
             </tr>
           </thead>
           <tbody>
-            {companies.map((company) => (
+            {filteredCompanies.map((company) => (
               <tr key={company.id} className={company.id === activeCompanyId ? "selected-row" : ""}>
                 <td><strong>{company.name}</strong></td>
                 <td><span className={`status-pill ${company.status}`}>{company.status}</span></td>
@@ -200,12 +258,15 @@ export function TenantCompaniesPage({
                   <button onClick={() => onCompanyChange(company.id)}>
                     <Building2 /> Switch
                   </button>
+                  <button className="ghost-button compact" disabled={busy} onClick={() => void updateCompanyStatus(company, company.status === "active" ? "suspended" : "active")}>
+                    {company.status === "active" ? "Suspend" : "Reactivate"}
+                  </button>
                 </td>
               </tr>
             ))}
-            {companies.length === 0 && (
+            {filteredCompanies.length === 0 && (
               <tr>
-                <td colSpan={5} className="project-empty">No companies available for this tenant</td>
+                <td colSpan={5} className="project-empty">No companies match these filters</td>
               </tr>
             )}
           </tbody>
@@ -279,7 +340,72 @@ export function TenantCompaniesPage({
           <p className="form-note">{invitations.length} pending tenant invitation{invitations.length === 1 ? "" : "s"}.</p>
         )}
       </section>
+      {companyDialogOpen && <CompanyDialog busy={busy} onCancel={() => setCompanyDialogOpen(false)} onCreate={createCompany} />}
     </section>
+  );
+}
+
+function CompanyDialog({
+  busy,
+  onCancel,
+  onCreate
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onCreate: (input: { name: string; slug?: string; primaryAdminEmail?: string; designerAllocation?: number; salesAllocation?: number }) => void;
+}) {
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [primaryAdminEmail, setPrimaryAdminEmail] = useState("");
+  const [designerAllocation, setDesignerAllocation] = useState("");
+  const [salesAllocation, setSalesAllocation] = useState("");
+  return (
+    <div className="modal-backdrop">
+      <form
+        className="modal-card phase5-dialog"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!name.trim()) return;
+          onCreate({
+            name: name.trim(),
+            slug: slug.trim() || undefined,
+            primaryAdminEmail: primaryAdminEmail.trim() || undefined,
+            designerAllocation: parseOptionalNumber(designerAllocation),
+            salesAllocation: parseOptionalNumber(salesAllocation)
+          });
+        }}
+      >
+        <h2>Create Company</h2>
+        <label className="field stacked">
+          <span>Company Name</span>
+          <input value={name} onChange={(event) => setName(event.target.value)} autoFocus />
+        </label>
+        <div className="form-grid-two">
+          <label className="field stacked">
+            <span>Slug</span>
+            <input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="optional" />
+          </label>
+          <label className="field stacked">
+            <span>Primary Admin Email</span>
+            <input type="email" value={primaryAdminEmail} onChange={(event) => setPrimaryAdminEmail(event.target.value)} placeholder="optional" />
+          </label>
+        </div>
+        <div className="form-grid-two">
+          <label className="field stacked">
+            <span>Designer Seats</span>
+            <input inputMode="numeric" value={designerAllocation} onChange={(event) => setDesignerAllocation(event.target.value)} placeholder="0" />
+          </label>
+          <label className="field stacked">
+            <span>Sales Seats</span>
+            <input inputMode="numeric" value={salesAllocation} onChange={(event) => setSalesAllocation(event.target.value)} placeholder="0" />
+          </label>
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="secondary-action" onClick={onCancel}>Cancel</button>
+          <button className="primary-action" disabled={busy || !name.trim()}>Create</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -303,4 +429,11 @@ function statusLabel(status?: string) {
 
 function titleCase(value: string) {
   return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function parseOptionalNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : undefined;
 }

@@ -169,6 +169,59 @@ export interface CommercialCompanySummary {
   projectCount: number;
 }
 
+export interface AdminDashboard {
+  metrics: {
+    totalTenants: number;
+    activeTenants: number;
+    companies: number;
+    users: number;
+    activeSubscriptions: number;
+    designerSeats: { allocated: number; assigned: number };
+    solarApiUsage: number;
+    projects: number;
+  };
+  tenants: Array<Tenant & { commercial?: { plan?: Pick<Plan, "id" | "code" | "name" | "description"> | null; subscription?: Partial<SubscriptionSummary> | null; companies?: number } }>;
+  recentActivity: Array<{ type: string; label: string; context?: string; at: string }>;
+}
+
+export interface AdminCompanySummary {
+  id: string;
+  tenantId: string;
+  tenant?: Tenant;
+  name: string;
+  slug: string;
+  status: CompanyStatus;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  users: number;
+  projects: number;
+  customers: number;
+  primaryAdmin?: { name: string; email: string } | null;
+  designerSeats: { allocated: number | null; assigned: number; unlimited: boolean; available: number | null };
+  salesSeats: { allocated: number | null; assigned: number; unlimited: boolean; available: number | null };
+  solarUsage: number;
+}
+
+export interface AdminCompanyDetail extends Omit<AdminCompanySummary, "projects" | "customers"> {
+  company: Company;
+  licensing: CompanyCommercialSummary;
+  projects: CloudProject[];
+  customers: Customer[];
+}
+
+export interface SupportModeContext {
+  active: boolean;
+  startedAt: string;
+  supportUser: Pick<ApiUser, "id" | "name" | "email">;
+  company: Workspace;
+  tenant: Tenant;
+  banner: string;
+}
+
 export interface TenantCommercialSummary {
   tenantId: string;
   subscription: SubscriptionSummary | null;

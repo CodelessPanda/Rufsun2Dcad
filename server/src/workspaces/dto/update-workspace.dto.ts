@@ -1,4 +1,4 @@
-import { IsEmail, IsOptional, IsString, IsUrl, MinLength } from "class-validator";
+import { IsEmail, IsIn, IsOptional, IsString, IsUrl, MinLength } from "class-validator";
 
 export class UpdateWorkspaceDto {
   @IsOptional()
@@ -41,4 +41,8 @@ export class UpdateWorkspaceDto {
   @IsOptional()
   @IsString()
   country?: string;
+
+  @IsOptional()
+  @IsIn(["active", "suspended", "archived"])
+  status?: "active" | "suspended" | "archived";
 }

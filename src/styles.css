@@ -2561,6 +2561,287 @@ button {
   outline-offset: 2px;
 }
 
+.phase5-admin-page {
+  display: grid;
+  gap: 14px;
+}
+
+.control-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.control-tabs button {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 6px;
+  color: #52667a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.control-tabs button.active {
+  color: #0f513f;
+  background: #e9f7f1;
+}
+
+.admin-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.activity-panel,
+.utilization-card {
+  display: grid;
+  gap: 14px;
+}
+
+.activity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-row {
+  display: grid;
+  grid-template-columns: 96px minmax(180px, 1fr) minmax(180px, auto);
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid #e1e8f0;
+  border-radius: 7px;
+  background: #fbfdff;
+}
+
+.activity-row span,
+.mini-stat span {
+  color: #60748a;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.activity-row strong {
+  color: #0f172a;
+}
+
+.activity-row small {
+  color: #52667a;
+  text-align: right;
+}
+
+.admin-filter-panel {
+  padding: 12px;
+}
+
+.admin-search-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 180px) minmax(150px, 220px);
+  gap: 12px;
+  align-items: end;
+}
+
+.tenant-company-toolbar {
+  margin-bottom: 12px;
+}
+
+.admin-search-row .field.stacked {
+  margin-bottom: 0;
+}
+
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid #ccd8e3;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.search-field svg {
+  width: 16px;
+  height: 16px;
+  color: #64748b;
+}
+
+.search-field input {
+  height: 30px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+
+.admin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(300px, 1fr));
+  gap: 14px;
+}
+
+.admin-company-card {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid #d8e2eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.company-card-title,
+.company-card-footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.company-card-title h2 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 16px;
+}
+
+.company-card-title p,
+.company-card-footer span {
+  margin: 4px 0 0;
+  color: #52667a;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.company-card-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mini-stat {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e1e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.mini-stat strong {
+  display: block;
+  margin-top: 5px;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.support-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  width: min(100% - 40px, 1180px);
+  margin: 18px auto 0;
+  padding: 12px 14px;
+  border: 1px solid #f4b740;
+  border-radius: 8px;
+  background: #fff7df;
+  color: #6b3f00;
+}
+
+.support-banner svg {
+  width: 18px;
+  height: 18px;
+}
+
+.support-banner strong,
+.support-banner span {
+  display: block;
+}
+
+.support-banner strong {
+  font-size: 13px;
+}
+
+.support-banner span {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.support-banner .secondary-action {
+  background: #ffffff;
+}
+
+.compact-hero {
+  min-height: auto;
+}
+
+.empty-action-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 74px;
+  padding: 10px 0;
+}
+
+.empty-action-state p {
+  margin: 0;
+  color: #64748b;
+}
+
+.phase5-dialog {
+  max-width: 560px;
+}
+
+.phase5-dialog h2 {
+  margin: 0 0 14px;
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.company-detail-dialog {
+  display: grid;
+  gap: 14px;
+}
+
+.detail-list-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-list-grid section {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #e1e8f0;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.detail-list-grid h3 {
+  margin: 0 0 8px;
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.detail-list-grid p {
+  margin: 0;
+  padding: 7px 0;
+  border-top: 1px solid #e1e8f0;
+  color: #52667a;
+  font-size: 12px;
+}
+
+.modal-card .modal-actions .primary-action,
+.modal-card .modal-actions .secondary-action {
+  width: auto;
+}
+
 @media (max-width: 1040px) {
   .saas-page {
     width: min(100% - 32px, 1180px);
@@ -2584,6 +2865,26 @@ button {
 
   .saas-page .session-table {
     min-width: 680px;
+  }
+
+  .admin-metric-grid,
+  .admin-card-grid,
+  .admin-search-row,
+  .activity-row,
+  .company-card-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-row small {
+    text-align: left;
+  }
+
+  .company-card-title,
+  .company-card-footer,
+  .detail-list-grid,
+  .support-banner {
+    align-items: stretch;
+    grid-template-columns: 1fr;
   }
 }
 

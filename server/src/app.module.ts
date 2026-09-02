@@ -1,6 +1,8 @@
 import { Module } from "@nestjs/common";
 import { AuthController } from "./auth/auth.controller";
 import { AuthService } from "./auth/auth.service";
+import { AdminController } from "./admin/admin.controller";
+import { AdminService } from "./admin/admin.service";
 import { CompaniesController } from "./companies/companies.controller";
 import { CustomersController } from "./customers/customers.controller";
 import { CustomersService } from "./customers/customers.service";
@@ -29,6 +31,7 @@ import { WorkspacesService } from "./workspaces/workspaces.service";
 @Module({
   controllers: [
     AuthController,
+    AdminController,
     AdminTenantsController,
     TenantsController,
     CompaniesController,
@@ -42,6 +45,7 @@ import { WorkspacesService } from "./workspaces/workspaces.service";
   ],
   providers: [
     PrismaService,
+    AdminService,
     AuthService,
     EmailService,
     PermissionService,

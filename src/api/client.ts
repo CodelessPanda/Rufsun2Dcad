@@ -1,5 +1,8 @@
 import type {
   ApiUser,
+  AdminCompanyDetail,
+  AdminCompanySummary,
+  AdminDashboard,
   CloudDocument,
   CloudProject,
   Company,
@@ -21,6 +24,7 @@ import type {
   UserSession,
   Workspace,
   CompanyRole,
+  SupportModeContext,
   WorkspaceMember,
   WorkspaceSummary,
   SolarDataLayers
@@ -185,6 +189,21 @@ export const api = {
   updateAdminTenant(tenantId: string, input: Partial<Pick<Tenant, "name" | "type" | "status">>) {
     return requestJson<Tenant>(`/admin/tenants/${tenantId}`, { method: "PATCH", body: JSON.stringify(input) });
   },
+  adminDashboard() {
+    return requestJson<AdminDashboard>("/admin/dashboard");
+  },
+  adminCompanies() {
+    return requestJson<AdminCompanySummary[]>("/admin/companies");
+  },
+  adminCompany(companyId: string) {
+    return requestJson<AdminCompanyDetail>(`/admin/companies/${companyId}`);
+  },
+  enterSupportMode(companyId: string) {
+    return requestJson<SupportModeContext>(`/admin/support-mode/companies/${companyId}`, { method: "POST" });
+  },
+  exitSupportMode() {
+    return requestJson<{ active: false }>("/admin/support-mode/exit", { method: "POST" });
+  },
   commercialOverview() {
     return requestJson<Array<Tenant & { commercial: TenantCommercialSummary }>>("/admin/commercial");
   },
@@ -206,8 +225,11 @@ export const api = {
   updateCompanySeatAllocation(tenantId: string, companyId: string, input: { seatType: Exclude<SeatType, "no_seat">; allocated?: number; unlimited?: boolean }) {
     return requestJson<unknown>(`/tenants/${tenantId}/companies/${companyId}/seat-allocation`, { method: "PATCH", body: JSON.stringify(input) });
   },
-  createTenantCompany(tenantId: string, input: { name: string }) {
+  createTenantCompany(tenantId: string, input: { name: string; slug?: string; primaryAdminEmail?: string; designerAllocation?: number; salesAllocation?: number }) {
     return requestJson<Company>(`/tenants/${tenantId}/companies`, { method: "POST", body: JSON.stringify(input) });
+  },
+  updateTenantCompany(tenantId: string, companyId: string, input: Partial<Company>) {
+    return requestJson<Company>(`/tenants/${tenantId}/companies/${companyId}`, { method: "PATCH", body: JSON.stringify(input) });
   },
   company(companyId: string) {
     return requestJson<Company>(`/companies/${companyId}`);

@@ -6,6 +6,7 @@ import { InvitationsService } from "../invitations/invitations.service";
 import { CreateTenantInvitationDto, UpdateTenantMemberDto } from "../members/dto/member-management.dto";
 import { MembersService } from "../members/members.service";
 import { CreateWorkspaceDto } from "../workspaces/dto/create-workspace.dto";
+import { UpdateWorkspaceDto } from "../workspaces/dto/update-workspace.dto";
 import { TenantsService } from "./tenants.service";
 
 @Controller("tenants")
@@ -30,6 +31,11 @@ export class TenantsController {
   @Post(":tenantId/companies")
   createCompany(@CurrentUser() user: RequestUser, @Param("tenantId") tenantId: string, @Body() dto: CreateWorkspaceDto) {
     return this.tenants.createCompany(user.id, tenantId, dto);
+  }
+
+  @Patch(":tenantId/companies/:companyId")
+  updateCompany(@CurrentUser() user: RequestUser, @Param("tenantId") tenantId: string, @Param("companyId") companyId: string, @Body() dto: UpdateWorkspaceDto) {
+    return this.tenants.updateTenantCompany(user.id, tenantId, companyId, dto);
   }
 
   @Get(":tenantId/members")

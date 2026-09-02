@@ -1,7 +1,7 @@
-import { Building2, ChevronDown, LayoutDashboard, LogOut, Settings, Users, UserRound, FolderOpen, Plus } from "lucide-react";
+import { Building2, ChevronDown, LayoutDashboard, LifeBuoy, LogOut, Settings, Users, UserRound, FolderOpen, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { can, UiPermissions } from "../../authz/permissions";
-import type { ApiUser, Tenant, Workspace } from "../../api/types";
+import type { ApiUser, SupportModeContext, Tenant, Workspace } from "../../api/types";
 
 export type AppView = "platform" | "tenant" | "dashboard" | "customers" | "customer" | "projects" | "designer" | "team" | "settings" | "profile";
 
@@ -18,6 +18,8 @@ interface Props {
   onCreateWorkspace: () => void;
   onNavigate: (view: AppView) => void;
   onLogout: () => Promise<void>;
+  supportMode?: SupportModeContext | null;
+  onExitSupportMode?: () => Promise<void>;
 }
 
 export function WorkspaceShell({
@@ -32,7 +34,9 @@ export function WorkspaceShell({
   onWorkspaceChange,
   onCreateWorkspace,
   onNavigate,
-  onLogout
+  onLogout,
+  supportMode,
+  onExitSupportMode
 }: Props) {
   return (
     <div className="saas-shell">
@@ -117,7 +121,21 @@ export function WorkspaceShell({
           </button>
         </div>
       </aside>
-      <main className="saas-main">{children}</main>
+      <main className="saas-main">
+        {supportMode?.active && (
+          <div className="support-banner">
+            <LifeBuoy />
+            <div>
+              <strong>Support Mode Viewing {supportMode.company.name}</strong>
+              <span>Logged in as {supportMode.supportUser.email}. Tenant: {supportMode.tenant.name}</span>
+            </div>
+            <button className="secondary-action" onClick={() => void onExitSupportMode?.()}>
+              Exit Support Mode
+            </button>
+          </div>
+        )}
+        {children}
+      </main>
     </div>
   );
 }

@@ -16,4 +16,18 @@ export class CreateWorkspaceDto {
   @IsOptional()
   @IsUrl({ require_protocol: false })
   website?: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsEmail()
+  primaryAdminEmail?: string;
+
+  @IsOptional()
+  designerAllocation?: number;
+
+  @IsOptional()
+  salesAllocation?: number;
 }

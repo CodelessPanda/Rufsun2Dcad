@@ -91,6 +91,7 @@ describe("RufsunCAD API security", () => {
 
   it("lets a platform super admin manage tenants without company membership", async () => {
     const admin = await register("admin@example.com");
+    const normal = await register("normal-admin-block@example.com");
     db.setPlatformRole("admin@example.com", "super_admin");
 
     const tenant = await request(app.getHttpServer())
@@ -100,6 +101,9 @@ describe("RufsunCAD API security", () => {
       .expect(201);
 
     await request(app.getHttpServer()).get("/api/admin/tenants").set("Authorization", `Bearer ${admin.token}`).expect(200);
+    await request(app.getHttpServer()).get("/api/admin/dashboard").set("Authorization", `Bearer ${admin.token}`).expect(200);
+    await request(app.getHttpServer()).get("/api/admin/companies").set("Authorization", `Bearer ${admin.token}`).expect(200);
+    await request(app.getHttpServer()).get("/api/admin/dashboard").set("Authorization", `Bearer ${normal.token}`).expect(403);
     await request(app.getHttpServer()).get(`/api/admin/tenants/${tenant.body.id}`).set("Authorization", `Bearer ${admin.token}`).expect(200);
     const company = await request(app.getHttpServer())
       .post(`/api/tenants/${tenant.body.id}/companies`)
@@ -111,6 +115,26 @@ describe("RufsunCAD API security", () => {
       .get(`/api/companies/${company.body.id}`)
       .set("Authorization", `Bearer ${admin.token}`)
       .expect(200);
+  });
+
+  it("allows only super admins to enter support mode for a company", async () => {
+    const admin = await register("support-super@example.com");
+    const normal = await register("support-normal@example.com");
+    db.setPlatformRole("support-super@example.com", "super_admin");
+    const company = await createCompany(normal.token, "Support Mode Company");
+
+    const support = await request(app.getHttpServer())
+      .post(`/api/admin/support-mode/companies/${company.id}`)
+      .set("Authorization", `Bearer ${admin.token}`)
+      .expect(201);
+
+    expect(support.body.active).toBe(true);
+    expect(support.body.supportUser.email).toBe("support-super@example.com");
+    expect(support.body.company.id).toBe(company.id);
+    await request(app.getHttpServer())
+      .post(`/api/admin/support-mode/companies/${company.id}`)
+      .set("Authorization", `Bearer ${normal.token}`)
+      .expect(403);
   });
 
   it("allows tenant admins to create companies only inside their tenant", async () => {
@@ -268,6 +292,18 @@ describe("RufsunCAD API security", () => {
 
     await setCompanyAllocation(admin.token, tenant.id, companyA.id, "designer", 6).expect(200);
     await setCompanyAllocation(admin.token, tenant.id, companyB.id, "designer", 5).expect(400);
+  });
+
+  it("allows tenant admins to allocate seats inside their own capacity", async () => {
+    const platform = await register("phase5-capacity-platform@example.com");
+    const tenantAdmin = await register("phase5-tenant-owner@example.com");
+    db.setPlatformRole("phase5-capacity-platform@example.com", "super_admin");
+    const ownerCompany = await createCompany(tenantAdmin.token, "Phase 5 Owner Company");
+    await setTenantCapacity(platform.token, ownerCompany.tenantId, "designer", 4);
+    const managedCompany = await createTenantCompany(tenantAdmin.token, ownerCompany.tenantId, "Phase 5 Managed Company");
+
+    await setCompanyAllocation(tenantAdmin.token, ownerCompany.tenantId, managedCompany.id, "designer", 3).expect(200);
+    await setCompanyAllocation(tenantAdmin.token, ownerCompany.tenantId, managedCompany.id, "designer", 5).expect(400);
   });
 
   it("enforces company seat allocation when assigning a third designer", async () => {
@@ -514,6 +550,7 @@ function createMemoryDb() {
     $transaction: vi.fn(async (actions: Promise<unknown>[]) => Promise.all(actions)),
     user: {
       findUnique: vi.fn(async ({ where, select }: any) => pick(state.users.find((user) => user.email === where.email || user.id === where.id) ?? null, select)),
+      count: vi.fn(async () => state.users.length),
       create: vi.fn(async ({ data }: any) => push(state.users, entity({ status: "active", platformRole: "user", ...data }))),
       update: vi.fn(async ({ where, data }: any) => Object.assign(find(state.users, where.id), withoutUndefined(data)))
     },
@@ -633,7 +670,13 @@ function createMemoryDb() {
       aggregate: vi.fn(async ({ where }: any) => ({
         _sum: { systemSizeKw: state.projects.filter((project) => matchProject(project, where)).reduce((sum, project) => sum + (project.systemSizeKw ?? 0), 0) }
       })),
-      findMany: vi.fn(async ({ where }: any) => state.projects.filter((project) => matchProject(project, where))),
+      findMany: vi.fn(async ({ where, include }: any) =>
+        state.projects.filter((project) => matchProject(project, where)).map((project) => ({
+          ...project,
+          ...(include?.customer ? { customer: state.customers.find((customer) => customer.id === project.customerId) } : {}),
+          ...(include?.company ? { company: includeCompany(find(state.companies, project.companyId), include.company.include) } : {})
+        }))
+      ),
       create: vi.fn(async ({ data, include }: any) => {
         const project = push(state.projects, entity({ ...data, archivedAt: null }));
         const document = push(state.documents, entity({ companyId: data.companyId, projectId: project.id, ...data.document.create }));
@@ -696,6 +739,7 @@ function createMemoryDb() {
       })
     },
     subscription: {
+      findMany: vi.fn(async ({ where, include }: any = {}) => state.subscriptions.filter((item) => matchSubscription(item, where)).map((subscription) => includeSubscription(subscription, include))),
       findFirst: vi.fn(async ({ where, include }: any) => {
         const subscription = state.subscriptions.find((item) => matchSubscription(item, where));
         return subscription ? includeSubscription(subscription, include) : null;
@@ -726,6 +770,7 @@ function createMemoryDb() {
       })
     },
     usageMeter: {
+      findMany: vi.fn(async ({ where }: any = {}) => state.usageMeters.filter((item) => matchUsageMeter(item, where))),
       findFirst: vi.fn(async ({ where }: any) => state.usageMeters.find((item) => matchUsageMeter(item, where)) ?? null),
       upsert: vi.fn(async ({ where, update, create }: any) => {
         const key = where.tenantId_companyId_key_periodStart;
@@ -933,7 +978,7 @@ function includeCompany(company: any, include: any): any {
   return {
     ...company,
     ...(include.tenant ? { tenant: includeTenant(find(currentState.tenants, company.tenantId), include.tenant.include) } : {}),
-    ...(include.members ? { members: currentState.companyMemberships.filter((membership) => membership.companyId === company.id) } : {}),
+    ...(include.members ? { members: currentState.companyMemberships.filter((membership) => membership.companyId === company.id).map((membership) => includeCompanyMembership(membership, include.members.include)) } : {}),
     ...(include.seatAllocations ? { seatAllocations: currentState.companySeatAllocations.filter((allocation) => allocation.companyId === company.id) } : {}),
     ...(include.subscriptions ? { subscriptions: currentState.subscriptions.filter((subscription) => subscription.companyId === company.id).map((subscription) => includeSubscription(subscription, include.subscriptions.include)) } : {}),
     ...(include.usageMeters ? { usageMeters: currentState.usageMeters.filter((usage) => usage.companyId === company.id) } : {}),

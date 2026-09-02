@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import type Konva from "konva";
 import { api, ApiError, getAccessToken } from "./api/client";
-import type { ApiUser, CloudProject, CompanyCommercialSummary, CompanyRole, CreateCustomerInput, Customer, Invitation, MembershipStatus, SeatType, Tenant, Workspace, WorkspaceMember, WorkspaceSummary } from "./api/types";
+import type { ApiUser, CloudProject, CompanyCommercialSummary, CompanyRole, CreateCustomerInput, Customer, Invitation, MembershipStatus, SeatType, SupportModeContext, Tenant, Workspace, WorkspaceMember, WorkspaceSummary } from "./api/types";
 import { PlatformAdminPage } from "./components/admin/PlatformAdminPage";
 import { AuthScreen } from "./components/auth/AuthScreen";
 import { PasswordResetScreen, VerifyEmailScreen } from "./components/auth/TokenActionScreens";
@@ -76,6 +76,7 @@ export function App() {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [companyInvitations, setCompanyInvitations] = useState<Invitation[]>([]);
   const [companyCommercial, setCompanyCommercial] = useState<CompanyCommercialSummary | null>(null);
+  const [supportMode, setSupportMode] = useState<SupportModeContext | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -308,6 +309,7 @@ export function App() {
     setUser(null);
     setTenants([]);
     setWorkspaces([]);
+    setSupportMode(null);
     setActiveWorkspaceId("");
     setActiveTenantId("");
     setAppView("dashboard");
@@ -340,6 +342,32 @@ export function App() {
     const validTenant = nextTenants.find((tenant) => tenant.id === activeTenantId) ?? nextTenants.find((tenant) => tenant.id === validCompany?.tenantId) ?? nextTenants[0];
     setActiveTenantId(validTenant?.id ?? "");
     setActiveWorkspaceId(validCompany?.id ?? "");
+  };
+
+  const enterSupportMode = async (companyId: string) => {
+    const context = await api.enterSupportMode(companyId);
+    setSupportMode(context);
+    setTenants((current) => (current.some((tenant) => tenant.id === context.tenant.id) ? current : [...current, context.tenant]));
+    setWorkspaces((current) => (current.some((workspace) => workspace.id === context.company.id) ? current : [...current, context.company]));
+    setActiveTenantId(context.tenant.id);
+    setActiveWorkspaceId(context.company.id);
+    setSelectedCustomer(null);
+    setActiveProjectId(null);
+    setCustomers([]);
+    setProjects([]);
+    setMembers([]);
+    setCompanyInvitations([]);
+    setCompanyCommercial(null);
+    setSummary(undefined);
+    setAppView("dashboard");
+    await refreshWorkspaceData(context.company.id);
+  };
+
+  const exitSupportMode = async () => {
+    await api.exitSupportMode().catch(() => undefined);
+    setSupportMode(null);
+    await refreshSaasContext();
+    setAppView("platform");
   };
 
   const handleTenantChange = (tenantId: string) => {
@@ -653,7 +681,7 @@ export function App() {
     if (user.platformRole === "super_admin") {
       return (
         <ErrorBoundary>
-          <PlatformAdminPage onChanged={refreshSaasContext} onLogout={handleLogout} />
+          <PlatformAdminPage onChanged={refreshSaasContext} onLogout={handleLogout} onEnterSupportMode={enterSupportMode} />
         </ErrorBoundary>
       );
     }
@@ -723,8 +751,10 @@ export function App() {
           if (view !== "designer") setViewMode("editor");
         }}
         onLogout={handleLogout}
+        supportMode={supportMode}
+        onExitSupportMode={exitSupportMode}
       >
-        {appView === "platform" && <PlatformAdminPage onChanged={refreshSaasContext} />}
+        {appView === "platform" && <PlatformAdminPage onChanged={refreshSaasContext} onEnterSupportMode={enterSupportMode} />}
         {appView === "tenant" && activeTenant && (
           <TenantCompaniesPage
             tenant={activeTenant}
@@ -735,7 +765,15 @@ export function App() {
           />
         )}
         {appView === "dashboard" && (
-          <DashboardPage summary={summary} projects={projects} customers={customers} onOpenProject={(id) => void openCloudProject(id)} />
+          <DashboardPage
+            summary={summary}
+            projects={projects}
+            customers={customers}
+            members={members}
+            licensing={companyCommercial}
+            onNewProject={() => openNewProject()}
+            onOpenProject={(id) => void openCloudProject(id)}
+          />
         )}
         {appView === "customers" && (
           <CustomersPage
@@ -790,6 +828,7 @@ export function App() {
             workspace={activeWorkspace}
             busy={workspaceBusy}
             error={workspaceError}
+            licensing={companyCommercial}
             onSave={async (input) => {
               setWorkspaceBusy(true);
               setWorkspaceError("");
