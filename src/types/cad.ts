@@ -18,6 +18,51 @@ export interface Point {
   y: number;
 }
 
+export type RoofEdgeClassification = "EAVE" | "RIDGE" | "HIP" | "VALLEY" | "RAKE" | "UNKNOWN";
+
+export interface RoofEdgeMetadata {
+  id: string;
+  index: number;
+  classification: RoofEdgeClassification;
+  setback?: number;
+}
+
+export interface SiteStructure {
+  id: string;
+  name: string;
+  roofFaceIds: string[];
+  buildingType?: "house" | "garage" | "shed" | "commercial" | "other";
+  notes?: string;
+}
+
+export interface ImageryMetadata {
+  provider: "google" | "airbus" | "skyfi" | "vexcel" | "other";
+  sourceId?: string;
+  captureDate?: string;
+  latitude: number;
+  longitude: number;
+  zoom: number;
+  imageWidthPx: number;
+  imageHeightPx: number;
+  widthM: number;
+  heightM: number;
+  metersPerPixelX: number;
+  metersPerPixelY: number;
+}
+
+export interface ScaleCalibration {
+  knownDistanceM: number;
+  measuredDistanceMm: number;
+  calibratedAt: string;
+}
+
+export interface SiteModel {
+  northRotation: number;
+  structures: SiteStructure[];
+  imagery?: ImageryMetadata;
+  scaleCalibration?: ScaleCalibration;
+}
+
 export interface Viewport {
   x: number;
   y: number;
@@ -49,6 +94,10 @@ export type CadObjectType =
   | "rectangle"
   | "circle"
   | "polygon"
+  | "obstruction"
+  | "restrictedZone"
+  | "equipment"
+  | "vegetation"
   | "text"
   | "dimension"
   | "solarPanel"
@@ -84,16 +133,59 @@ export interface PolygonObject extends CadObjectBase {
   fill: string;
 }
 
-export interface RoofObject extends CadObjectBase {
-  type: "roof";
+export interface ObstructionObject extends CadObjectBase {
+  type: "obstruction";
+  name: string;
+  obstructionType?: "skylight" | "chimney" | "hvac" | "roofHatch" | "vent" | "tank" | "other";
+  points: Point[];
+  clearance: number;
+  stroke: string;
+  fill: string;
+}
+
+export interface RestrictedZoneObject extends CadObjectBase {
+  type: "restrictedZone";
   name: string;
   points: Point[];
   stroke: string;
   fill: string;
+}
+
+export interface EquipmentObject extends CadObjectBase {
+  type: "equipment";
+  name: string;
+  equipmentType?: "inverter" | "disconnect" | "mainPanel" | "battery" | "utilityMeter" | "other";
+  width: number;
+  height: number;
+  stroke: string;
+  fill: string;
+}
+
+export interface VegetationObject extends CadObjectBase {
+  type: "vegetation";
+  label: string;
+  radius: number;
+  heightM?: number;
+  stroke: string;
+  fill: string;
+}
+
+export interface RoofObject extends CadObjectBase {
+  type: "roof";
+  name: string;
+  structureId?: string;
+  points: Point[];
+  stroke: string;
+  fill: string;
   tilt: number;
+  pitch?: number;
   azimuth: number;
   heightM: number;
+  elevationM?: number;
+  roofType?: "flat" | "pitched" | "shed" | "gable" | "hip" | "other";
+  material?: "metal" | "tile" | "shingle" | "concrete" | "other";
   setback: number;
+  edgeMetadata?: RoofEdgeMetadata[];
 }
 
 export interface MapCaptureSettings {
@@ -155,6 +247,10 @@ export type CadObject =
   | RectangleObject
   | CircleObject
   | PolygonObject
+  | ObstructionObject
+  | RestrictedZoneObject
+  | EquipmentObject
+  | VegetationObject
   | RoofObject
   | MapImageObject
   | TextObject
@@ -186,6 +282,7 @@ export interface RufsunCadDocument {
   customerAddress?: string;
   mapCapture?: MapCaptureSettings;
   solarRegistration?: SolarRegistration;
+  site?: SiteModel;
   units: CadUnits;
   objects: CadObject[];
   layers: CadLayer[];

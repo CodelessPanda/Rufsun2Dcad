@@ -32,9 +32,8 @@ import type { ProjectSolarDataState } from "./cad/solar/solarExposureTypes";
 import {
   applySolarRegistrationToState,
   DEFAULT_SOLAR_DEBUG_LAYERS,
-  loadProjectSolarExposure,
   updateSolarDebugLayers
-} from "./services/googleSolar";
+} from "./services/solarExposureState";
 import { normalizeSolarRegistration } from "./cad/solar/solarGeoTransform";
 import type { MapCaptureSettings, RufsunCadDocument, SolarRegistration } from "./types/cad";
 
@@ -609,7 +608,7 @@ export function App() {
     setSolarExposure((current) => ({ ...current, status: "loading", error: undefined }));
     try {
       setSolarExposure(
-        await loadProjectSolarExposure({
+        await (await import("./services/googleSolar")).loadProjectSolarExposure({
           workspaceId: activeWorkspaceId,
           projectId: activeProjectId,
           mapCapture: document.mapCapture,

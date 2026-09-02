@@ -4,10 +4,12 @@ import { LicenseCapabilityService } from "../common/license-capability.service";
 import { Permissions, ProductCapabilities } from "../common/permissions";
 import { CommercialService } from "../commercial/commercial.service";
 import { Entitlements } from "../commercial/commercial.constants";
+import { CacheService } from "../common/cache.service";
 
 const SOLAR_DATA_RADIUS_METERS = 50;
 const SOLAR_PIXEL_SIZE_METERS = 0.1;
 const SOLAR_CACHE_TTL_MS = 50 * 60 * 1000;
+const SOLAR_FETCH_TIMEOUT_MS = 15_000;
 const SOLAR_LAYER_URL_KEYS = {
   "annual-flux": "annualFluxUrl",
   rgb: "rgbUrl",
@@ -39,12 +41,11 @@ interface CachedLayers {
 
 @Injectable()
 export class SolarService {
-  private readonly cache = new Map<string, CachedLayers>();
-
   constructor(
     @Inject(AccessControlService) private readonly access: AccessControlService,
     @Inject(LicenseCapabilityService) private readonly licenses: LicenseCapabilityService,
-    @Inject(CommercialService) private readonly commercial: CommercialService
+    @Inject(CommercialService) private readonly commercial: CommercialService,
+    @Inject(CacheService) private readonly cache: CacheService
   ) {}
 
   async getDataLayers(userId: string, companyId: string, projectId: string, clientGoogleApiKey?: string) {
@@ -58,7 +59,7 @@ export class SolarService {
       throw new BadRequestException("Project installation location is missing coordinates.");
     }
 
-    const cached = this.cache.get(projectId);
+    const cached = await this.cache.get<CachedLayers>(solarCacheKey(projectId));
     if (
       cached &&
       Date.now() - cached.loadedAt < SOLAR_CACHE_TTL_MS &&
@@ -82,7 +83,7 @@ export class SolarService {
       key: apiKey
     });
 
-    const response = await fetch(`https://solar.googleapis.com/v1/dataLayers:get?${params.toString()}`);
+    const response = await fetchWithTimeout(`https://solar.googleapis.com/v1/dataLayers:get?${params.toString()}`);
     const data = (await response.json().catch(() => ({}))) as SolarDataLayersResponse & { error?: { message?: string; status?: string } };
     if (!response.ok) {
       if (response.status === 404) throw new NotFoundException("Solar exposure data is not available for this location.");
@@ -91,7 +92,7 @@ export class SolarService {
     if (!data.annualFluxUrl) throw new NotFoundException("Annual solar flux layer is not available for this location.");
 
     await this.commercial.recordSolarRequest(companyId);
-    this.cache.set(projectId, { projectId, latitude, longitude, loadedAt: Date.now(), data });
+    await this.cache.set(solarCacheKey(projectId), { projectId, latitude, longitude, loadedAt: Date.now(), data }, SOLAR_CACHE_TTL_MS);
     return this.toClientResponse(companyId, projectId, data, Date.now());
   }
 
@@ -107,7 +108,7 @@ export class SolarService {
     if (!layerUrl) throw new NotFoundException(`${layer} Solar layer is not available for this location.`);
     const apiKey = resolveGoogleSolarApiKey(clientGoogleApiKey);
 
-    const response = await fetch(prepareGeoTiffUrl(layerUrl, apiKey));
+    const response = await fetchWithTimeout(prepareGeoTiffUrl(layerUrl, apiKey));
     if (!response.ok) {
       if (response.status === 404) throw new NotFoundException("Solar exposure GeoTIFF is no longer available. Refresh solar data.");
       throw new BadRequestException(`Unable to download ${layer} Solar GeoTIFF.`);
@@ -121,7 +122,7 @@ export class SolarService {
 
   private async getRawDataLayers(userId: string, companyId: string, projectId: string, clientGoogleApiKey?: string) {
     await this.getDataLayers(userId, companyId, projectId, clientGoogleApiKey);
-    const cached = this.cache.get(projectId);
+    const cached = await this.cache.get<CachedLayers>(solarCacheKey(projectId));
     if (!cached) throw new NotFoundException("Solar data cache is unavailable.");
     return cached.data;
   }
@@ -163,4 +164,23 @@ function prepareGeoTiffUrl(url: string, apiKey: string) {
 
 function nearlySame(a: number, b: number) {
   return Math.abs(a - b) < 0.000001;
+}
+
+function solarCacheKey(projectId: string) {
+  return `solar:data-layers:${projectId}`;
+}
+
+async function fetchWithTimeout(url: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SOLAR_FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new BadRequestException("Solar API request timed out. Please try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }

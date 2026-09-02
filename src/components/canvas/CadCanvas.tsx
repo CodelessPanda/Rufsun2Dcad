@@ -4,7 +4,7 @@ import type Konva from "konva";
 import { useCadStore } from "../../store/useCadStore";
 import type { CadObject, Point, RoofObject, SolarPanelObject } from "../../types/cad";
 import { clampScale, screenToWorld, zoomAroundPoint } from "../../cad/viewport/viewport";
-import { getBoundingBox, rectanglesOverlap, panelOverlapsExisting, pointInsidePolygon } from "../../cad/geometry/geometry";
+import { getBoundingBox, rectanglesOverlap, pointInsidePolygon, validatePanelPlacement, validatePolygon } from "../../cad/geometry/geometry";
 import { calculateSnap, snapPanelToPanels, snapToGrid } from "../../cad/snapping/snapping";
 import { sampleSolarModules } from "../../data/sampleSolarModules";
 import {
@@ -226,8 +226,14 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) 
       const panel = createSolarPanel(point, module, getPreferredLayerId("solar", document.settings.activeLayerId, document.layers), nextZ(document.objects));
       panel.rotation = roof?.azimuth ?? panel.rotation;
       const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
-      if (panelOverlapsExisting(panel, existingPanels)) {
-        showToast("Cannot place panel here — space is occupied");
+      const validation = validatePanelPlacement(panel, {
+        roofs: document.objects.filter((object): object is RoofObject => object.type === "roof"),
+        existingPanels,
+        obstructions: document.objects.filter((object) => object.type === "obstruction"),
+        restrictedZones: document.objects.filter((object) => object.type === "restrictedZone")
+      });
+      if (!validation.valid) {
+        showToast(`Cannot place panel here — ${panelPlacementMessage(validation.reasons)}`);
         return;
       }
       addObjects([panel], [panel.id]);
@@ -343,6 +349,13 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) 
     const currentDraft = useCadStore.getState().draft;
     if (!currentDraft || currentDraft.type !== "polygon" || currentDraft.points.length < 3) return;
     const points = currentDraft.points;
+    if (currentDraft.roof) {
+      const validation = validatePolygon(points);
+      if (!validation.valid) {
+        showToast(`Cannot complete roof — ${roofValidationMessage(validation.reasons)}`);
+        return;
+      }
+    }
     const object = currentDraft.roof
       ? createRoof(points, nextZ(document.objects))
       : createPolygon(points, document.settings.activeLayerId, nextZ(document.objects));
@@ -470,6 +483,10 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) 
 
   return (
     <div ref={containerRef} className="canvas-shell" style={{ cursor: canvasCursor }}>
+      <div className="north-indicator" title={`North rotation: ${document.site?.northRotation ?? 0} deg`}>
+        <span style={{ transform: `rotate(${document.site?.northRotation ?? 0}deg)` }}>↑</span>
+        <strong>N</strong>
+      </div>
       <div className="ruler ruler-horizontal">{renderRulerLabels(viewport, size.width, true)}</div>
       <div className="ruler ruler-vertical">{renderRulerLabels(viewport, size.height, false)}</div>
       <Stage
@@ -637,6 +654,23 @@ function getPreferredLayerId(
   const fallback = layers.find((layer) => layer.id === fallbackLayerId);
   if (fallback?.visible && !fallback.locked) return fallbackLayerId;
   return layers.find((layer) => layer.visible && !layer.locked)?.id ?? preferredLayerId;
+}
+
+function panelPlacementMessage(reasons: string[]) {
+  if (reasons.includes("PANEL_OVERLAP")) return "space is occupied";
+  if (reasons.includes("OBSTRUCTION_COLLISION")) return "obstruction clearance";
+  if (reasons.includes("RESTRICTED_ZONE")) return "restricted zone";
+  if (reasons.includes("SETBACK_VIOLATION")) return "setback clearance";
+  if (reasons.includes("INVALID_ROOF")) return "roof geometry is invalid";
+  return "outside roof boundary";
+}
+
+function roofValidationMessage(reasons: string[]) {
+  if (reasons.includes("TOO_FEW_POINTS")) return "add at least three points";
+  if (reasons.includes("SELF_INTERSECTION")) return "lines cross each other";
+  if (reasons.includes("DUPLICATE_CONSECUTIVE_POINT") || reasons.includes("ZERO_LENGTH_EDGE")) return "remove duplicate points";
+  if (reasons.includes("NEAR_ZERO_AREA")) return "area is too small";
+  return "invalid roof geometry";
 }
 
 function renderRulerLabels(viewport: { x: number; y: number; scale: number }, length: number, horizontal: boolean) {

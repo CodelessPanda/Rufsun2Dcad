@@ -7,6 +7,7 @@ import { CommercialService } from "../commercial/commercial.service";
 import { Entitlements } from "../commercial/commercial.constants";
 import type { CreateProjectDto } from "./dto/create-project.dto";
 import type { UpdateProjectDto } from "./dto/update-project.dto";
+import { validateCadDocument } from "../documents/cad-document.validator";
 
 @Injectable()
 export class ProjectsService {
@@ -33,7 +34,8 @@ export class ProjectsService {
     await this.ensureProjectLimit(companyId);
     const customer = await this.access.requireCustomer(userId, companyId, dto.customerId);
     if (customer.companyId !== companyId) throw new BadRequestException("The customer does not belong to this company.");
-    const summary = summarizeDocument(dto.documentJson);
+    const documentJson = validateCadDocument(dto.documentJson ?? minimalDocument(dto.name, customer.name, dto.address), dto.schemaVersion ?? "1");
+    const summary = summarizeDocument(documentJson);
     return this.prisma.project.create({
       data: {
         companyId,
@@ -57,7 +59,7 @@ export class ProjectsService {
         document: {
           create: {
             companyId,
-            documentJson: (dto.documentJson ?? minimalDocument(dto.name, customer.name, dto.address)) as Prisma.InputJsonValue,
+            documentJson: documentJson as Prisma.InputJsonValue,
             schemaVersion: dto.schemaVersion ?? "1"
           }
         }

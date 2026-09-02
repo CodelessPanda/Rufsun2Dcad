@@ -13,6 +13,45 @@ const solarRegistrationSchema = z.object({
   calibrated: z.boolean()
 });
 
+const roofEdgeMetadataSchema = z.object({
+  id: z.string(),
+  index: z.number().int().nonnegative(),
+  classification: z.enum(["EAVE", "RIDGE", "HIP", "VALLEY", "RAKE", "UNKNOWN"]),
+  setback: z.number().nonnegative().optional()
+});
+
+const siteSchema = z.object({
+  northRotation: z.number(),
+  structures: z.array(
+    z.object({
+      id: z.string(),
+      name: z.string(),
+      roofFaceIds: z.array(z.string()),
+      buildingType: z.enum(["house", "garage", "shed", "commercial", "other"]).optional(),
+      notes: z.string().optional()
+    })
+  ),
+  imagery: z.object({
+    provider: z.enum(["google", "airbus", "skyfi", "vexcel", "other"]),
+    sourceId: z.string().optional(),
+    captureDate: z.string().optional(),
+    latitude: z.number(),
+    longitude: z.number(),
+    zoom: z.number(),
+    imageWidthPx: z.number().positive(),
+    imageHeightPx: z.number().positive(),
+    widthM: z.number().positive(),
+    heightM: z.number().positive(),
+    metersPerPixelX: z.number().positive(),
+    metersPerPixelY: z.number().positive()
+  }).optional(),
+  scaleCalibration: z.object({
+    knownDistanceM: z.number().positive(),
+    measuredDistanceMm: z.number().positive(),
+    calibratedAt: z.string()
+  }).optional()
+});
+
 const baseSchema = z.object({
   id: z.string(),
   type: z.string(),
@@ -47,15 +86,54 @@ const objectSchema = z.discriminatedUnion("type", [
     fill: z.string()
   }),
   baseSchema.extend({
+    type: z.literal("obstruction"),
+    name: z.string(),
+    obstructionType: z.enum(["skylight", "chimney", "hvac", "roofHatch", "vent", "tank", "other"]).optional(),
+    points: z.array(pointSchema).min(3),
+    clearance: z.number().nonnegative(),
+    stroke: z.string(),
+    fill: z.string()
+  }),
+  baseSchema.extend({
+    type: z.literal("restrictedZone"),
+    name: z.string(),
+    points: z.array(pointSchema).min(3),
+    stroke: z.string(),
+    fill: z.string()
+  }),
+  baseSchema.extend({
+    type: z.literal("equipment"),
+    name: z.string(),
+    equipmentType: z.enum(["inverter", "disconnect", "mainPanel", "battery", "utilityMeter", "other"]).optional(),
+    width: z.number().positive(),
+    height: z.number().positive(),
+    stroke: z.string(),
+    fill: z.string()
+  }),
+  baseSchema.extend({
+    type: z.literal("vegetation"),
+    label: z.string(),
+    radius: z.number().positive(),
+    heightM: z.number().positive().optional(),
+    stroke: z.string(),
+    fill: z.string()
+  }),
+  baseSchema.extend({
     type: z.literal("roof"),
     name: z.string(),
+    structureId: z.string().optional(),
     points: z.array(pointSchema).min(3),
     stroke: z.string(),
     fill: z.string(),
     tilt: z.number(),
+    pitch: z.number().optional(),
     azimuth: z.number(),
     heightM: z.number(),
-    setback: z.number().nonnegative()
+    elevationM: z.number().optional(),
+    roofType: z.enum(["flat", "pitched", "shed", "gable", "hip", "other"]).optional(),
+    material: z.enum(["metal", "tile", "shingle", "concrete", "other"]).optional(),
+    setback: z.number().nonnegative(),
+    edgeMetadata: z.array(roofEdgeMetadataSchema).optional()
   }),
   baseSchema.extend({
     type: z.literal("text"),
@@ -116,6 +194,7 @@ export const documentSchema = z.object({
     mapType: z.enum(["satellite", "roadmap", "hybrid"])
   }).optional(),
   solarRegistration: solarRegistrationSchema.optional(),
+  site: siteSchema.optional(),
   units: z.literal("mm"),
   objects: z.array(objectSchema),
   layers: z.array(

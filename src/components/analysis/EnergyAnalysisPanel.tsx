@@ -6,7 +6,7 @@ import type { TimePeriod } from "../../cad/energy/energyCalculator";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
 import { DEFAULT_ELECTRICITY_RATE_INR, DEFAULT_INSTALL_COST_PER_WATT_INR, ELECTRICITY_RATE_UNIT, formatCurrency, INSTALL_COST_UNIT } from "../../cad/finance/currency";
 import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
-import { buildRoofAnnualFluxMap } from "../../cad/solar/solarAnalysis";
+import { buildPanelAnnualFluxMap, buildRoofAnnualFluxMap } from "../../cad/solar/solarAnalysis";
 
 const PERIODS = ["today", "week", "month", "year"] as const;
 
@@ -25,6 +25,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
   const allPanels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const panels = filterPanelsOnRoofs(allPanels, roofs);
+  const annualFluxByPanelId = buildPanelAnnualFluxMap(panels, solarExposure);
   const annualFluxByRoofId = buildRoofAnnualFluxMap(roofs, solarExposure);
 
   if (allPanels.length === 0) {
@@ -55,6 +56,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
     panels,
     roofs,
     averageRadiance,
+    annualFluxByPanelId,
     annualFluxByRoofId,
     temperatureCorrectionFactor: 0.95,
     sunlightHours,

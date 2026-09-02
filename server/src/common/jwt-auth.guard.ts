@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
 import type { AuthenticatedRequest, RequestUser } from "./request-user";
+import { updateRequestContext } from "./request-context";
 
 interface AccessTokenPayload {
   sub: string;
@@ -19,6 +20,7 @@ export class JwtAuthGuard implements CanActivate {
     try {
       const payload = jwt.verify(token, process.env.JWT_SECRET || "dev-access-secret") as unknown as AccessTokenPayload;
       request.user = { id: payload.sub, email: payload.email } satisfies RequestUser;
+      updateRequestContext({ userId: payload.sub });
       return true;
     } catch {
       throw new UnauthorizedException("Invalid or expired access token");

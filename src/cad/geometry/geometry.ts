@@ -7,6 +7,29 @@ import type {
   RoofObject,
   SolarPanelObject
 } from "../../types/cad";
+import {
+  panelFootprint,
+  pointInPolygon,
+  polygonArea as robustPolygonArea,
+  polygonContainsPolygon,
+  roofUsablePolygons,
+  validatePanelPlacement
+} from "./polygonEngine";
+
+export {
+  differencePolygons,
+  intersectPolygons,
+  offsetPolygon,
+  offsetPolygonPerEdge,
+  panelFootprint,
+  polygonContainsPolygon,
+  polygonsIntersect,
+  roofUsablePolygons,
+  totalPolygonArea,
+  unionPolygons,
+  validatePanelPlacement,
+  validatePolygon
+} from "./polygonEngine";
 
 export interface BoundingBox {
   x: number;
@@ -65,25 +88,11 @@ export function nearestPointOnLine(point: Point, a: Point, b: Point): Point {
 }
 
 export function pointInsidePolygon(point: Point, polygon: Point[]): boolean {
-  let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const pi = polygon[i];
-    const pj = polygon[j];
-    const intersects =
-      pi.y > point.y !== pj.y > point.y &&
-      point.x < ((pj.x - pi.x) * (point.y - pi.y)) / (pj.y - pi.y) + pi.x;
-    if (intersects) inside = !inside;
-  }
-  return inside;
+  return pointInPolygon(point, polygon);
 }
 
 export function polygonArea(points: Point[]): number {
-  if (points.length < 3) return 0;
-  const sum = points.reduce((acc, point, index) => {
-    const next = points[(index + 1) % points.length];
-    return acc + point.x * next.y - next.x * point.y;
-  }, 0);
-  return Math.abs(sum / 2);
+  return robustPolygonArea(points);
 }
 
 export function rectanglesOverlap(a: BoundingBox, b: BoundingBox): boolean {
@@ -100,8 +109,10 @@ export function getBoundingBox(object: CadObject): BoundingBox {
     case "rectangle":
     case "solarPanel":
     case "mapImage":
+    case "equipment":
       return rotatedRectBounds(object.x, object.y, object.width, object.height, object.rotation);
     case "circle":
+    case "vegetation":
       return {
         x: object.x - object.radius,
         y: object.y - object.radius,
@@ -109,6 +120,8 @@ export function getBoundingBox(object: CadObject): BoundingBox {
         height: object.radius * 2
       };
     case "polygon":
+    case "obstruction":
+    case "restrictedZone":
     case "roof":
       return boundsFromPoints(object.points);
     case "dimension":
@@ -156,7 +169,7 @@ export function translateObject<T extends CadObject>(object: T, dx: number, dy: 
     translated.x2 += dx;
     translated.y2 += dy;
   }
-  if (translated.type === "polygon" || translated.type === "roof") {
+  if (translated.type === "polygon" || translated.type === "roof" || translated.type === "obstruction" || translated.type === "restrictedZone") {
     translated.points = translated.points.map((point) => ({ x: point.x + dx, y: point.y + dy }));
   }
   if (translated.type === "dimension") {
@@ -179,7 +192,7 @@ export function objectSnapPoints(object: CadObject): Array<{ point: Point; kind:
   if (object.type === "dimension") {
     return dimensionSnapPoints(object);
   }
-  if (object.type === "polygon" || object.type === "roof") {
+  if (object.type === "polygon" || object.type === "roof" || object.type === "obstruction" || object.type === "restrictedZone") {
     const points = object.points.flatMap((point, index) => {
       const next = object.points[(index + 1) % object.points.length];
       return [
@@ -189,7 +202,7 @@ export function objectSnapPoints(object: CadObject): Array<{ point: Point; kind:
     });
     return [...points, { point: centerOfBounds(getBoundingBox(object)), kind: "center" }];
   }
-  if (object.type === "circle") {
+  if (object.type === "circle" || object.type === "vegetation") {
     return [
       { point: { x: object.x, y: object.y }, kind: "center" },
       { point: { x: object.x + object.radius, y: object.y }, kind: "edge" },
@@ -239,42 +252,37 @@ export function formatFeetInches(mm: number): string {
 }
 
 export function roofUsablePolygon(roof: RoofObject, clearance = 0): Point[] {
-  const inset = Math.max(0, roof.setback) + Math.max(0, clearance);
-  if (inset <= 0) return roof.points;
-  const center = roof.points.reduce(
-    (acc, point) => ({ x: acc.x + point.x / roof.points.length, y: acc.y + point.y / roof.points.length }),
-    { x: 0, y: 0 }
-  );
-  return roof.points.map((point) => {
-    const dx = point.x - center.x;
-    const dy = point.y - center.y;
-    const length = Math.max(1, Math.hypot(dx, dy));
-    const nextLength = Math.max(0, length - inset);
-    return {
-      x: center.x + (dx / length) * nextLength,
-      y: center.y + (dy / length) * nextLength
-    };
-  });
+  return roofUsablePolygons(roof, clearance)[0] ?? [];
 }
 
 export function roofContainsPanel(panel: SolarPanelObject, roofs: RoofObject[], clearance = PANEL_SETBACK_CLEARANCE_MM): boolean {
   if (roofs.length === 0) return true;
-  const corners = rectCorners(panel.x, panel.y, panel.width, panel.height, panel.rotation);
-  return roofs.some((roof) => polygonFullyContainsRect(corners, roofUsablePolygon(roof, clearance)));
+  return validatePanelPlacement(panel, { roofs, clearanceMm: clearance }).valid;
 }
 
 export function findContainingRoof(panel: SolarPanelObject, roofs: RoofObject[], clearance = PANEL_SETBACK_CLEARANCE_MM): RoofObject | undefined {
   if (roofs.length === 0) return undefined;
-  const corners = rectCorners(panel.x, panel.y, panel.width, panel.height, panel.rotation);
-  return roofs.find((roof) => polygonFullyContainsRect(corners, roofUsablePolygon(roof, clearance)));
+  return validatePanelPlacement(panel, { roofs, clearanceMm: clearance }).roof;
 }
 
 export function panelOverlapsExisting(panel: SolarPanelObject, existing: SolarPanelObject[]): boolean {
-  const a = getBoundingBox(panel);
   return existing.some((other) => {
     if (other.id === panel.id) return false;
-    return rectanglesOverlap(a, getBoundingBox(other));
+    return polygonContainsPolygon(panelFootprint(other), panelFootprint(panel)) || polygonContainsPolygon(panelFootprint(panel), panelFootprint(other)) || polygonFootprintsIntersect(panel, other);
   });
+}
+
+function polygonFootprintsIntersect(a: SolarPanelObject, b: SolarPanelObject) {
+  const aBox = getBoundingBox(a);
+  const bBox = getBoundingBox(b);
+  if (!rectanglesOverlap(aBox, bBox)) return false;
+  const aFootprint = panelFootprint(a);
+  const bFootprint = panelFootprint(b);
+  return (
+    aFootprint.some((point) => pointInsidePolygon(point, bFootprint)) ||
+    bFootprint.some((point) => pointInsidePolygon(point, aFootprint)) ||
+    polygonEdges(aFootprint).some((edge) => polygonEdges(bFootprint).some((otherEdge) => segmentsIntersect(edge.start, edge.end, otherEdge.start, otherEdge.end)))
+  );
 }
 
 function polygonFullyContainsRect(rectPoints: Point[], polygon: Point[]) {

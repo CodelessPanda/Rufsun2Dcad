@@ -8,6 +8,7 @@ import { CommercialService } from "../commercial/commercial.service";
 import { Entitlements } from "../commercial/commercial.constants";
 import type { SaveDocumentDto } from "./dto/save-document.dto";
 import { summarizeDocument } from "../projects/projects.service";
+import { validateCadDocument } from "./cad-document.validator";
 
 @Injectable()
 export class DocumentsService {
@@ -32,18 +33,19 @@ export class DocumentsService {
     await this.access.requireCompanyMembership(userId, companyId, Permissions.DESIGN_EDIT);
     await this.commercial.requireCompanyEntitlement(companyId, Entitlements.CAD_EDIT);
     await this.licenses.requireSeatCapability(userId, companyId, ProductCapabilities.CAD_EDIT);
-    const summary = summarizeDocument(dto.documentJson);
+    const documentJson = validateCadDocument(dto.documentJson, dto.schemaVersion ?? "1");
+    const summary = summarizeDocument(documentJson);
     const [document] = await this.prisma.$transaction([
       this.prisma.projectDocument.upsert({
         where: { projectId },
         create: {
           companyId,
           projectId,
-          documentJson: dto.documentJson as Prisma.InputJsonValue,
+          documentJson: documentJson as Prisma.InputJsonValue,
           schemaVersion: dto.schemaVersion ?? "1"
         },
         update: {
-          documentJson: dto.documentJson as Prisma.InputJsonValue,
+          documentJson: documentJson as Prisma.InputJsonValue,
           schemaVersion: dto.schemaVersion ?? "1"
         }
       }),

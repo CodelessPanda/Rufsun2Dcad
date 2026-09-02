@@ -4,7 +4,7 @@ import { calculateArrayStats } from "../cad/array/array";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs, type EnergyGenerationResult } from "../cad/energy/energyCalculator";
 import { DEFAULT_ELECTRICITY_RATE_INR, CURRENCY_CODE, formatCurrency } from "../cad/finance/currency";
 import { distance, findContainingRoof, formatFeetInches, midpoint, polygonArea } from "../cad/geometry/geometry";
-import { buildRoofAnnualFluxMap } from "../cad/solar/solarAnalysis";
+import { buildPanelAnnualFluxMap, buildRoofAnnualFluxMap } from "../cad/solar/solarAnalysis";
 import { getRoofFluxStatistics } from "../cad/solar/solarStatistics";
 import { googleStaticMapUrl } from "../services/googleMaps";
 import type { MapCaptureSettings, RoofObject, RufsunCadDocument, SolarPanelObject } from "../types/cad";
@@ -76,11 +76,13 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
   const panels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const installedPanels = filterPanelsOnRoofs(panels, roofs);
+  const annualFluxByPanelId = buildPanelAnnualFluxMap(installedPanels, solarExposure);
   const annualFluxByRoofId = buildRoofAnnualFluxMap(roofs, solarExposure);
   const energy = calculateAllPeriods({
     panels,
     roofs,
     averageRadiance: 800,
+    annualFluxByPanelId,
     annualFluxByRoofId,
     temperatureCorrectionFactor: 0.95,
     sunlightHours: 6,

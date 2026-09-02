@@ -24,6 +24,26 @@ describe("calculateAllPeriods", () => {
     expect(results.month.totalEnergyKwh).toBeCloseTo(62.47);
     expect(results.year.averageAnnualFlux).toBe(1600);
   });
+
+  it("prefers panel-footprint flux over roof-average flux when both are available", () => {
+    const roof = makeRoof("roof-a");
+    const panel = makePanel("panel-a", 500);
+
+    const results = calculateAllPeriods({
+      panels: [panel],
+      roofs: [roof],
+      averageRadiance: 800,
+      annualFluxByPanelId: { [panel.id]: 1900 },
+      annualFluxByRoofId: { [roof.id]: 1200 },
+      temperatureCorrectionFactor: 0.95,
+      sunlightHours: 6,
+      electricityRate: DEFAULT_ELECTRICITY_RATE_INR
+    });
+
+    expect(results.year.dataSource).toBe("solar-api");
+    expect(results.year.totalEnergyKwh).toBe(902.5);
+    expect(results.year.averageAnnualFlux).toBe(1900);
+  });
 });
 
 function makeRoof(id: string): RoofObject {
@@ -57,8 +77,8 @@ function makePanel(id: string, wattage: number): SolarPanelObject {
   return {
     id,
     type: "solarPanel",
-    x: 1500,
-    y: 1500,
+    x: 1000,
+    y: 1000,
     rotation: 0,
     layerId: "solar",
     visible: true,

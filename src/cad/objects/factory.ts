@@ -14,6 +14,7 @@ import type {
   TextObject
 } from "../../types/cad";
 import type { SolarModuleCatalogItem } from "../../data/sampleSolarModules";
+import { normalizeRoofFace } from "../site/siteModel";
 
 export function nextZ(objects: CadObject[]) {
   return objects.reduce((max, object) => Math.max(max, object.zIndex), 0) + 1;
@@ -89,7 +90,7 @@ export function createPolygon(points: Point[], layerId: string, zIndex: number):
 }
 
 export function createRoof(points: Point[], zIndex: number): RoofObject {
-  return {
+  return normalizeRoofFace({
     id: uuid(),
     type: "roof",
     x: points[0].x,
@@ -107,7 +108,7 @@ export function createRoof(points: Point[], zIndex: number): RoofObject {
     azimuth: 180,
     heightM: 10,
     setback: 500
-  };
+  });
 }
 
 export function createSolarPanel(

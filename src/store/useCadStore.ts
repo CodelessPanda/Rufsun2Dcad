@@ -15,7 +15,8 @@ import type {
 import { createBlankDocument, createDemoDocument } from "../cad/document/defaultDocument";
 import { DEFAULT_SCALE } from "../cad/viewport/viewport";
 import { calculateArrayStats } from "../cad/array/array";
-import { roofContainsPanel, translateObject } from "../cad/geometry/geometry";
+import { translateObject, validatePanelPlacement } from "../cad/geometry/geometry";
+import { ensureSiteModel } from "../cad/site/siteModel";
 
 interface CadState {
   document: RufsunCadDocument;
@@ -113,7 +114,10 @@ export const useCadStore = create<CadState>((set, get) => ({
   toast: "",
 
   setDocument: (document, recordHistory = true) =>
-    set((state) => (recordHistory ? withHistory(state, document, []) : { document: touch(document) })),
+    set((state) => {
+      const normalized = ensureSiteModel(document);
+      return recordHistory ? withHistory(state, normalized, []) : { document: touch(normalized) };
+    }),
   setProjectName: (name) =>
     set((state) => {
       const trimmed = name.trim();
@@ -145,10 +149,10 @@ export const useCadStore = create<CadState>((set, get) => ({
     set((state) =>
       withHistory(
         state,
-        {
+        ensureSiteModel({
           ...state.document,
-          objects: [...state.document.objects, ...objects].sort((a, b) => a.zIndex - b.zIndex)
-        },
+          objects: markPanelRoofWarnings([...state.document.objects, ...objects]).sort((a, b) => a.zIndex - b.zIndex)
+        }),
         selectIds ?? state.selectedIds
       )
     ),
@@ -158,35 +162,35 @@ export const useCadStore = create<CadState>((set, get) => ({
         if (object.id !== id || !canModify(object, state.document.layers)) return object;
         return { ...object, ...patch } as CadObject;
       });
-      const nextDocument = { ...state.document, objects: markPanelRoofWarnings(nextObjects) };
+      const nextDocument = ensureSiteModel({ ...state.document, objects: markPanelRoofWarnings(nextObjects) });
       return recordHistory ? withHistory(state, nextDocument) : { document: touch(nextDocument) };
     }),
   replaceObject: (replacement, recordHistory = true) =>
     set((state) => {
-      const nextDocument = {
+      const nextDocument = ensureSiteModel({
         ...state.document,
         objects: markPanelRoofWarnings(
           state.document.objects.map((object) => (object.id === replacement.id && canModify(object, state.document.layers) ? replacement : object))
         )
-      };
+      });
       return recordHistory ? withHistory(state, nextDocument) : { document: touch(nextDocument) };
     }),
   translateObjects: (ids, dx, dy, recordHistory = true) =>
     set((state) => {
-      const nextDocument = {
+      const nextDocument = ensureSiteModel({
         ...state.document,
         objects: markPanelRoofWarnings(
           state.document.objects.map((object) =>
             ids.includes(object.id) && canModify(object, state.document.layers) ? translateObject(object, dx, dy) : object
           )
         )
-      };
+      });
       return recordHistory ? withHistory(state, nextDocument) : { document: touch(nextDocument) };
     }),
   applyDragFromOriginals: (originals, dx, dy, recordHistory = false) =>
     set((state) => {
       const originalsById = new Map(originals.map((object) => [object.id, object]));
-      const nextDocument = {
+      const nextDocument = ensureSiteModel({
         ...state.document,
         objects: markPanelRoofWarnings(
           state.document.objects.map((object) => {
@@ -194,7 +198,7 @@ export const useCadStore = create<CadState>((set, get) => ({
             return original && canModify(object, state.document.layers) ? translateObject(original, dx, dy) : object;
           })
         )
-      };
+      });
       return recordHistory ? withHistory(state, nextDocument) : { document: touch(nextDocument) };
     }),
   deleteSelected: () =>
@@ -205,7 +209,7 @@ export const useCadStore = create<CadState>((set, get) => ({
       if (deletable.size === 0) return {};
       return withHistory(
         state,
-        { ...state.document, objects: state.document.objects.filter((object) => !deletable.has(object.id)) },
+        ensureSiteModel({ ...state.document, objects: state.document.objects.filter((object) => !deletable.has(object.id)) }),
         []
       );
     }),
@@ -217,7 +221,11 @@ export const useCadStore = create<CadState>((set, get) => ({
     set((state) => {
       if (state.clipboard.length === 0) return {};
       const clones = state.clipboard.map((object) => cloneObject(object));
-      return withHistory(state, { ...state.document, objects: [...state.document.objects, ...clones] }, clones.map((object) => object.id));
+      return withHistory(
+        state,
+        ensureSiteModel({ ...state.document, objects: markPanelRoofWarnings([...state.document.objects, ...clones]) }),
+        clones.map((object) => object.id)
+      );
     }),
   duplicateSelected: () => {
     get().copySelected();
@@ -323,10 +331,28 @@ export const useCadStore = create<CadState>((set, get) => ({
 
 function markPanelRoofWarnings(objects: CadObject[]): CadObject[] {
   const roofs = objects.filter((object): object is Extract<CadObject, { type: "roof" }> => object.type === "roof");
+  const obstructions = objects.filter((object): object is Extract<CadObject, { type: "obstruction" }> => object.type === "obstruction");
+  const restrictedZones = objects.filter((object): object is Extract<CadObject, { type: "restrictedZone" }> => object.type === "restrictedZone");
+  const panels = objects.filter((object): object is Extract<CadObject, { type: "solarPanel" }> => object.type === "solarPanel");
   return objects.map((object) => {
     if (object.type !== "solarPanel") return object;
-    return roofContainsPanel(object, roofs) ? { ...object, warning: undefined } : { ...object, warning: "Panel outside roof boundary" };
+    const result = validatePanelPlacement(object, {
+      roofs,
+      existingPanels: panels,
+      obstructions,
+      restrictedZones
+    });
+    return result.valid ? { ...object, warning: undefined } : { ...object, warning: panelWarningText(result.reasons) };
   });
+}
+
+function panelWarningText(reasons: string[]) {
+  if (reasons.includes("PANEL_OVERLAP")) return "Panel overlaps another module";
+  if (reasons.includes("OBSTRUCTION_COLLISION")) return "Panel conflicts with obstruction clearance";
+  if (reasons.includes("RESTRICTED_ZONE")) return "Panel conflicts with restricted zone";
+  if (reasons.includes("SETBACK_VIOLATION")) return "Panel crosses setback clearance";
+  if (reasons.includes("INVALID_ROOF")) return "Roof geometry is invalid";
+  return "Panel outside roof boundary";
 }
 
 function chooseActiveLayer(layers: CadLayer[], currentLayerId: string) {

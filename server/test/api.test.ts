@@ -5,6 +5,7 @@ import request from "supertest";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { Entitlements, PLAN_DEFINITIONS } from "../src/commercial/commercial.constants";
+import { resetRateLimitBucketsForTests } from "../src/common/rate-limit.middleware";
 import { PrismaService } from "../src/prisma.service";
 
 let currentState = fresh();
@@ -16,6 +17,7 @@ describe("RufsunCAD API security", () => {
 
   beforeEach(async () => {
     db.reset();
+    resetRateLimitBucketsForTests();
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(db.prisma)
@@ -38,6 +40,62 @@ describe("RufsunCAD API security", () => {
     await request(app.getHttpServer()).get("/api/auth/me").set("Authorization", `Bearer ${registered.body.accessToken}`).expect(200);
     await request(app.getHttpServer()).post("/api/auth/login").send({ email: "rohit@example.com", password: "wrong" }).expect(401);
     await request(app.getHttpServer()).post("/api/auth/login").send({ email: "rohit@example.com", password: "Password123" }).expect(201);
+  });
+
+  it("reports health and database readiness", async () => {
+    await request(app.getHttpServer()).get("/api/health").expect(200).expect(({ body }) => {
+      expect(body.status).toBe("ok");
+    });
+    await request(app.getHttpServer()).get("/api/health/ready").expect(200).expect(({ body }) => {
+      expect(body.dependencies.database).toBe("ok");
+    });
+  });
+
+  it("rate limits a sensitive endpoint", async () => {
+    await register("limited@example.com");
+    for (let index = 0; index < 8; index += 1) {
+      await request(app.getHttpServer()).post("/api/auth/login").send({ email: "limited@example.com", password: "wrong" }).expect(401);
+    }
+    await request(app.getHttpServer()).post("/api/auth/login").send({ email: "limited@example.com", password: "wrong" }).expect(429);
+  });
+
+  it("validates CAD document saves without breaking valid documents", async () => {
+    const user = await register("phase6-cad-validation@example.com");
+    const company = await createCompany(user.token, "CAD Validation Company");
+    const customer = await createCustomer(user.token, company.id, "CAD Validation Customer");
+    const project = await createProject(user.token, company.id, customer.body.id, "CAD Validation Project", 28.6, 77.2);
+
+    await request(app.getHttpServer())
+      .put(`/api/companies/${company.id}/projects/${project.body.id}/document`)
+      .set("Authorization", `Bearer ${user.token}`)
+      .send({ documentJson: sampleDoc(2), schemaVersion: "1" })
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .put(`/api/companies/${company.id}/projects/${project.body.id}/document`)
+      .set("Authorization", `Bearer ${user.token}`)
+      .send({ documentJson: { name: "Broken", objects: "not-an-array" }, schemaVersion: "1" })
+      .expect(400)
+      .expect(({ body }) => {
+        expect(body.message).toContain("CAD document validation failed");
+        expect(body.errors.length).toBeGreaterThan(0);
+      });
+  });
+
+  it("prevents cross-company private asset downloads", async () => {
+    const userA = await register("asset-a@example.com");
+    const userB = await register("asset-b@example.com");
+    const companyA = await createCompany(userA.token, "Asset Company A");
+    const companyB = await createCompany(userB.token, "Asset Company B");
+    const asset = await request(app.getHttpServer())
+      .post(`/api/companies/${companyA.id}/assets`)
+      .set("Authorization", `Bearer ${userA.token}`)
+      .send({ purpose: "customer_upload", filename: "note.txt", contentType: "text/plain", base64: Buffer.from("private").toString("base64") })
+      .expect(201);
+
+    await request(app.getHttpServer()).get(`/api/companies/${companyA.id}/assets/${asset.body.id}/download`).set("Authorization", `Bearer ${userA.token}`).expect(200);
+    await request(app.getHttpServer()).get(`/api/companies/${companyA.id}/assets/${asset.body.id}/download`).set("Authorization", `Bearer ${userB.token}`).expect(403);
+    await request(app.getHttpServer()).get(`/api/companies/${companyB.id}/assets/${asset.body.id}/download`).set("Authorization", `Bearer ${userB.token}`).expect(404);
   });
 
   it("isolates company customers, projects, documents, and solar routes", async () => {
@@ -782,6 +840,16 @@ function createMemoryDb() {
         }
         return push(state.usageMeters, entity(create));
       })
+    },
+    fileAsset: {
+      create: vi.fn(async ({ data }: any) => push(state.fileAssets, entity({ visibility: "private", archivedAt: null, ...data }))),
+      findFirst: vi.fn(async ({ where }: any) => state.fileAssets.find((asset) => matchFileAsset(asset, where)) ?? null)
+    },
+    backgroundJob: {
+      create: vi.fn(async ({ data }: any) => push(state.backgroundJobs, entity({ status: "queued", attempts: 0, maxAttempts: 3, ...data }))),
+      findFirst: vi.fn(async ({ where }: any) => state.backgroundJobs.find((job) => matchBackgroundJob(job, where)) ?? null),
+      findUnique: vi.fn(async ({ where }: any) => state.backgroundJobs.find((job) => job.id === where.id) ?? null),
+      update: vi.fn(async ({ where, data }: any) => Object.assign(find(state.backgroundJobs, where.id), withoutUndefined(applyAtomicUpdates(data))))
     }
   };
   return {
@@ -819,6 +887,8 @@ function fresh() {
     tenantSeatCapacities: [] as any[],
     companySeatAllocations: [] as any[],
     usageMeters: [] as any[],
+    fileAssets: [] as any[],
+    backgroundJobs: [] as any[],
     emailVerificationTokens: [] as any[],
     passwordResetTokens: [] as any[],
     customers: [] as any[],
@@ -960,6 +1030,24 @@ function matchUsageMeter(usage: any, where: any = {}) {
   return true;
 }
 
+function matchFileAsset(asset: any, where: any = {}) {
+  if (!where) return true;
+  if (where.id && asset.id !== where.id) return false;
+  if (where.companyId && asset.companyId !== where.companyId) return false;
+  if (where.projectId && asset.projectId !== where.projectId) return false;
+  if (where.archivedAt === null && asset.archivedAt) return false;
+  return true;
+}
+
+function matchBackgroundJob(job: any, where: any = {}) {
+  if (!where) return true;
+  if (where.id && job.id !== where.id) return false;
+  if (where.companyId && job.companyId !== where.companyId) return false;
+  if (where.projectId && job.projectId !== where.projectId) return false;
+  if (where.status && job.status !== where.status) return false;
+  return true;
+}
+
 function includeTenant(tenant: any, include: any): any {
   if (!include) return tenant;
   return {
@@ -1048,6 +1136,12 @@ function findBy(array: any[], key: string, value: string) {
 
 function withoutUndefined(data: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+}
+
+function applyAtomicUpdates(data: Record<string, any>) {
+  return Object.fromEntries(
+    Object.entries(data).map(([key, value]) => [key, typeof value === "object" && value?.increment ? value.increment : value])
+  );
 }
 
 function sameTime(a: Date | string, b: Date | string) {

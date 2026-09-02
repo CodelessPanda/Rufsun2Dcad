@@ -5,11 +5,16 @@ import type {
   RoofObject,
   RufsunCadDocument
 } from "../../types/cad";
+import { createDefaultSiteModel, DEFAULT_STRUCTURE_ID, normalizeRoofFace } from "../site/siteModel";
 
 export const defaultLayers: CadLayer[] = [
   { id: "map", name: "Map", color: "#315b8f", visible: true, locked: false },
+  { id: "structures", name: "Structures", color: "#0f766e", visible: true, locked: false },
   { id: "roof", name: "Roof", color: "#16855f", visible: true, locked: false },
+  { id: "obstructions", name: "Obstructions", color: "#b45309", visible: true, locked: false },
   { id: "solar", name: "Solar", color: "#f28c28", visible: true, locked: false },
+  { id: "equipment", name: "Equipment", color: "#4f46e5", visible: true, locked: false },
+  { id: "vegetation", name: "Vegetation", color: "#4d7c0f", visible: true, locked: false },
   { id: "dimensions", name: "Dimensions", color: "#315b8f", visible: true, locked: false },
   { id: "annotations", name: "Annotations", color: "#64748b", visible: true, locked: false },
   { id: "general", name: "General", color: "#334155", visible: true, locked: false }
@@ -22,7 +27,7 @@ export function createBlankDocument(
   mapCapture?: MapCaptureSettings
 ): RufsunCadDocument {
   const now = new Date().toISOString();
-  return {
+  const document: RufsunCadDocument = {
     rufsunCadVersion: "0.2",
     version: "0.2",
     name,
@@ -35,6 +40,24 @@ export function createBlankDocument(
       rotationDegrees: 0,
       scale: 1,
       calibrated: false
+    },
+    site: {
+      northRotation: 0,
+      structures: [{ id: DEFAULT_STRUCTURE_ID, name: "Main Structure", buildingType: "house", roofFaceIds: [] }],
+      imagery: mapCapture
+        ? {
+            provider: "google",
+            latitude: mapCapture.latitude,
+            longitude: mapCapture.longitude,
+            zoom: mapCapture.zoom,
+            imageWidthPx: mapCapture.imageWidthPx,
+            imageHeightPx: mapCapture.imageHeightPx,
+            widthM: mapCapture.widthM,
+            heightM: mapCapture.heightM,
+            metersPerPixelX: mapCapture.widthM / mapCapture.imageWidthPx,
+            metersPerPixelY: mapCapture.heightM / mapCapture.imageHeightPx
+          }
+        : undefined
     },
     units: "mm",
     objects: mapCapture
@@ -78,11 +101,12 @@ export function createBlankDocument(
     createdAt: now,
     updatedAt: now
   };
+  return { ...document, site: createDefaultSiteModel(document) };
 }
 
 export function createDemoDocument(): RufsunCadDocument {
   const document = createBlankDocument("RufsunCAD Demo Roof Layout");
-  const roof: RoofObject = {
+  const roof: RoofObject = normalizeRoofFace({
     id: uuid(),
     type: "roof",
     x: 800,
@@ -106,10 +130,15 @@ export function createDemoDocument(): RufsunCadDocument {
     azimuth: 180,
     heightM: 10,
     setback: 500
-  };
+  });
 
   return {
     ...document,
+    site: {
+      ...document.site,
+      northRotation: document.site?.northRotation ?? 0,
+      structures: [{ id: DEFAULT_STRUCTURE_ID, name: "Main Structure", buildingType: "house", roofFaceIds: [roof.id] }]
+    },
     objects: [roof],
     updatedAt: new Date().toISOString()
   };

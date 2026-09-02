@@ -15,6 +15,13 @@ describe("SolarService", () => {
     requireSolarRequestAvailable: vi.fn(),
     recordSolarRequest: vi.fn()
   };
+  const cache = {
+    values: new Map<string, unknown>(),
+    get: vi.fn(async (key: string) => cache.values.get(key)),
+    set: vi.fn(async (key: string, value: unknown) => {
+      cache.values.set(key, value);
+    })
+  };
   let service: SolarService;
 
   beforeEach(() => {
@@ -25,7 +32,8 @@ describe("SolarService", () => {
     commercial.requireCompanyEntitlement.mockResolvedValue(undefined);
     commercial.requireSolarRequestAvailable.mockResolvedValue(undefined);
     commercial.recordSolarRequest.mockResolvedValue(undefined);
-    service = new SolarService(access as never, licenses as never, commercial as never);
+    cache.values.clear();
+    service = new SolarService(access as never, licenses as never, commercial as never, cache as never);
     process.env.GOOGLE_SOLAR_API_KEY = "solar-key";
   });
 

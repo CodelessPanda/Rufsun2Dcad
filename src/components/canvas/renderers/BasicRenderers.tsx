@@ -1,8 +1,8 @@
 import { Arrow, Circle, Group, Image as KonvaImage, Label, Line, Rect, Tag, Text } from "react-konva";
 import type Konva from "konva";
 import { useEffect, useState } from "react";
-import type { CadObject, CircleObject, DimensionObject, LineObject, MapImageObject, PolygonObject, RectangleObject, RoofObject, TextObject } from "../../../types/cad";
-import { distance, formatFeetInches, formatMetric, midpoint, polygonArea } from "../../../cad/geometry/geometry";
+import type { CadObject, CircleObject, DimensionObject, EquipmentObject, LineObject, MapImageObject, ObstructionObject, PolygonObject, RectangleObject, RestrictedZoneObject, RoofObject, TextObject, VegetationObject } from "../../../types/cad";
+import { distance, formatFeetInches, formatMetric, midpoint, polygonArea, roofUsablePolygon } from "../../../cad/geometry/geometry";
 import { googleStaticMapUrl } from "../../../services/googleMaps";
 
 interface SharedProps<T extends CadObject> {
@@ -55,7 +55,7 @@ export function LineRenderer(props: SharedProps<LineObject>) {
   );
 }
 
-export function RectangleRenderer(props: SharedProps<RectangleObject>) {
+export function RectangleRenderer(props: SharedProps<RectangleObject | EquipmentObject>) {
   const { object, selected, scale } = props;
   return (
     <Group {...shared(props)} x={object.x} y={object.y} rotation={object.rotation}>
@@ -117,7 +117,7 @@ export function MapImageRenderer(props: SharedProps<MapImageObject>) {
   );
 }
 
-export function CircleRenderer(props: SharedProps<CircleObject>) {
+export function CircleRenderer(props: SharedProps<CircleObject | VegetationObject>) {
   const { object, selected, scale } = props;
   return (
     <Group {...shared(props)} x={object.x} y={object.y} rotation={object.rotation}>
@@ -131,7 +131,7 @@ export function CircleRenderer(props: SharedProps<CircleObject>) {
   );
 }
 
-export function PolygonRenderer(props: SharedProps<PolygonObject | RoofObject>) {
+export function PolygonRenderer(props: SharedProps<PolygonObject | RoofObject | ObstructionObject | RestrictedZoneObject>) {
   const { object, selected, scale } = props;
   const flatPoints = object.points.flatMap((point) => [point.x - object.x, point.y - object.y]);
   const isRoof = object.type === "roof";
@@ -145,13 +145,7 @@ export function PolygonRenderer(props: SharedProps<PolygonObject | RoofObject>) 
     : null;
   const setbackPoints =
     isRoof && object.setback > 0
-      ? object.points.flatMap((point) => {
-          const center = object.points.reduce((acc, p) => ({ x: acc.x + p.x / object.points.length, y: acc.y + p.y / object.points.length }), { x: 0, y: 0 });
-          const dx = point.x - center.x;
-          const dy = point.y - center.y;
-          const len = Math.max(1, Math.hypot(dx, dy));
-          return [point.x - object.x - (dx / len) * object.setback, point.y - object.y - (dy / len) * object.setback];
-        })
+      ? roofUsablePolygon(object).flatMap((point) => [point.x - object.x, point.y - object.y])
       : [];
 
   return (

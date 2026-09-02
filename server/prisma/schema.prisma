@@ -119,6 +119,18 @@ enum ProjectStatus {
   archived
 }
 
+enum FileVisibility {
+  private
+  public
+}
+
+enum BackgroundJobStatus {
+  queued
+  processing
+  completed
+  failed
+}
+
 model User {
   id              String             @id @default(uuid()) @db.Uuid
   name            String
@@ -497,4 +509,59 @@ model UsageMeter {
   @@index([key])
   @@index([periodStart])
   @@map("usage_meters")
+}
+
+model FileAsset {
+  id            String         @id @default(uuid()) @db.Uuid
+  tenantId      String         @map("tenant_id") @db.Uuid
+  companyId     String         @map("company_id") @db.Uuid
+  projectId     String?        @map("project_id") @db.Uuid
+  createdById   String?        @map("created_by") @db.Uuid
+  purpose       String
+  filename      String
+  contentType   String         @map("content_type")
+  byteSize      Int            @map("byte_size")
+  storageDriver String         @map("storage_driver")
+  storageBucket String?        @map("storage_bucket")
+  storageKey    String         @map("storage_key")
+  checksumSha256 String?       @map("checksum_sha256")
+  visibility    FileVisibility @default(private)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  archivedAt    DateTime?      @map("archived_at")
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([projectId])
+  @@index([purpose])
+  @@index([createdAt])
+  @@map("file_assets")
+}
+
+model BackgroundJob {
+  id          String              @id @default(uuid()) @db.Uuid
+  tenantId    String?             @map("tenant_id") @db.Uuid
+  companyId   String?             @map("company_id") @db.Uuid
+  projectId   String?             @map("project_id") @db.Uuid
+  createdById String?             @map("created_by") @db.Uuid
+  type        String
+  status      BackgroundJobStatus @default(queued)
+  attempts    Int                 @default(0)
+  maxAttempts Int                 @default(3) @map("max_attempts")
+  payload     Json?
+  result      Json?
+  error       String?
+  queuedAt    DateTime            @default(now()) @map("queued_at")
+  startedAt   DateTime?           @map("started_at")
+  completedAt DateTime?           @map("completed_at")
+  failedAt    DateTime?           @map("failed_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([projectId])
+  @@index([status])
+  @@index([type])
+  @@index([queuedAt])
+  @@map("background_jobs")
 }

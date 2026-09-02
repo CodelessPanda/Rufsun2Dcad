@@ -3,7 +3,6 @@ import { ChevronDown, Download, FileDown, Home, Magnet, Save, Sun } from "lucide
 import { useEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { useCadStore } from "../../store/useCadStore";
 import type { ProjectSolarDataState, SolarDebugLayerState } from "../../cad/solar/solarExposureTypes";
-import { exportProjectReportPdf } from "../../reports/projectReport";
 import { SolarExposurePanel } from "../panels/SolarExposurePanel";
 import type { RoofObject } from "../../types/cad";
 import type { CompanyCommercialSummary } from "../../api/types";
@@ -111,7 +110,9 @@ export function TopBar({
     }
     clearSelection();
     requestAnimationFrame(() => {
-      void exportProjectReportPdf({ document, stage: stageRef.current, solarExposure });
+      void import("../../reports/projectReport").then(({ exportProjectReportPdf }) => {
+        void exportProjectReportPdf({ document, stage: stageRef.current, solarExposure });
+      });
     });
   };
 

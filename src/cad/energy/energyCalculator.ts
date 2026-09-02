@@ -8,6 +8,7 @@ export interface EnergyCalculationParams {
   panels: SolarPanelObject[];
   roofs: RoofObject[];
   averageRadiance: number; // W/m², mean daytime irradiance used when no weather data is available
+  annualFluxByPanelId?: Record<string, number>; // kWh/kW/year sampled from Google Solar API under each panel
   annualFluxByRoofId?: Record<string, number>; // kWh/kW/year from Google Solar API annual flux layer
   temperatureCorrectionFactor?: number; // Default: 0.95 (accounts for temperature losses)
   sunlightHours?: number; // Default: 6 (average usable sunlight hours per day)
@@ -196,7 +197,7 @@ export function calculateEnergyGeneration(
       0
     ) / panelCount;
 
-  const solarApiEstimate = calculateSolarApiAnnualEstimate(panelsOnRoofs, params.roofs, params.annualFluxByRoofId, temperatureFactor);
+  const solarApiEstimate = calculateSolarApiAnnualEstimate(panelsOnRoofs, params.roofs, params.annualFluxByPanelId, params.annualFluxByRoofId, temperatureFactor);
   if (solarApiEstimate) {
     const totalEnergyKwh = solarApiEstimate.annualEnergyKwh * (daysInPeriod / 365);
     const dailyEnergyKwh = solarApiEstimate.annualEnergyKwh / 365;
@@ -245,10 +246,11 @@ export function calculateEnergyGeneration(
 function calculateSolarApiAnnualEstimate(
   panels: SolarPanelObject[],
   roofs: RoofObject[],
+  annualFluxByPanelId: Record<string, number> | undefined,
   annualFluxByRoofId: Record<string, number> | undefined,
   temperatureFactor: number
 ) {
-  if (!annualFluxByRoofId) return null;
+  if (!annualFluxByPanelId && !annualFluxByRoofId) return null;
   let annualEnergyKwh = 0;
   let capacityWithFlux = 0;
   let weightedFlux = 0;
@@ -256,8 +258,8 @@ function calculateSolarApiAnnualEstimate(
   for (const panel of panels) {
     const roof = findContainingRoof(panel, roofs);
     if (!roof) continue;
-    const annualFlux = annualFluxByRoofId[roof.id];
-    if (!Number.isFinite(annualFlux) || annualFlux <= 0) continue;
+    const annualFlux = annualFluxByPanelId?.[panel.id] ?? annualFluxByRoofId?.[roof.id];
+    if (typeof annualFlux !== "number" || !Number.isFinite(annualFlux) || annualFlux <= 0) continue;
     const capacityKwp = panel.wattage / 1000;
     annualEnergyKwh += capacityKwp * annualFlux * temperatureFactor;
     capacityWithFlux += capacityKwp;

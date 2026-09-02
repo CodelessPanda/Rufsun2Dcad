@@ -22,10 +22,14 @@ export function CadObjectRenderer(props: Props) {
     case "line":
       return <LineRenderer {...props} object={props.object} />;
     case "rectangle":
+    case "equipment":
       return <RectangleRenderer {...props} object={props.object} />;
     case "circle":
+    case "vegetation":
       return <CircleRenderer {...props} object={props.object} />;
     case "polygon":
+    case "obstruction":
+    case "restrictedZone":
     case "roof":
       return <PolygonRenderer {...props} object={props.object} />;
     case "text":

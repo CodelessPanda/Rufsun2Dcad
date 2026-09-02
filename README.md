@@ -29,6 +29,8 @@ VITE_API_URL=http://localhost:4000/api
 
 If `VITE_API_URL` is not set, the frontend uses `http://localhost:4000/api`.
 
+Heavy report and Google Solar raster code is lazy-loaded so the main CAD/SaaS shell starts with a smaller initial bundle.
+
 ## Backend Setup
 
 The backend lives in `server/` and uses NestJS, Prisma, and PostgreSQL.
@@ -62,6 +64,10 @@ FRONTEND_URL="http://localhost:5173"
 PORT=4000
 GOOGLE_MAPS_BROWSER_KEY=""
 GOOGLE_SOLAR_API_KEY=""
+REQUEST_BODY_LIMIT="10mb"
+STORAGE_DRIVER="local"
+LOCAL_STORAGE_PATH="./storage"
+REDIS_URL=""
 ```
 
 5. Install and initialize:
@@ -84,6 +90,8 @@ Password: Demo12345
 
 `GOOGLE_SOLAR_API_KEY` is used server-side for Google Solar API `dataLayers:get` and GeoTIFF download proxying. The browser still uses the Maps key for Places/Maps UI during development.
 
+Phase 6 production hardening adds request IDs, structured logging, safe API errors, targeted rate limiting, CAD document validation, health checks, private asset metadata, local object-storage fallback, Redis-ready cache preparation, and background job status scaffolding.
+
 Useful backend commands:
 
 ```bash
@@ -92,6 +100,8 @@ npm run test
 npm run prisma:migrate
 npm run prisma:seed
 ```
+
+For production deployment, backups, object storage, Redis, reverse proxy, and health check notes, see [docs/production.md](docs/production.md).
 
 ## Project Architecture
 
@@ -150,7 +160,10 @@ server/
     common/       JWT guard and workspace access checks
     customers/    workspace-scoped CRM-lite customer API
     documents/    JSONB CAD document API
+    health/       liveness/readiness checks
+    jobs/         background job status primitives
     projects/     workspace/customer project API
+    storage/      private object-storage abstraction and asset download API
     workspaces/   workspace, members, summary API
 ```
 

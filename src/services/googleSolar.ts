@@ -3,16 +3,9 @@ import type { MapCaptureSettings, SolarRegistration } from "../types/cad";
 import { createSolarFluxCanvas } from "../cad/solar/solarHeatmap";
 import { decodeAnnualFluxGeoTiff } from "../cad/solar/solarFlux";
 import { createSolarGeoTransform, normalizeSolarRegistration } from "../cad/solar/solarGeoTransform";
-import type { ProjectSolarDataState, SolarDebugLayerState, SolarLayerTransforms } from "../cad/solar/solarExposureTypes";
+import type { ProjectSolarDataState, SolarLayerTransforms } from "../cad/solar/solarExposureTypes";
 import { decodeNumericSolarGeoTiff, decodeRgbSolarGeoTiff, type SolarNumericRaster, type SolarRgbRaster } from "../cad/solar/solarRaster";
-
-export const DEFAULT_SOLAR_DEBUG_LAYERS: SolarDebugLayerState = {
-  googleSolarRgb: false,
-  annualFlux: false,
-  dsm: false,
-  buildingMask: false,
-  opacity: 0.5
-};
+import { DEFAULT_SOLAR_DEBUG_LAYERS } from "./solarExposureState";
 
 export async function loadProjectSolarExposure(params: {
   workspaceId: string;
@@ -79,38 +72,6 @@ export function updateSolarExposureOpacity(state: ProjectSolarDataState, opacity
     ...state,
     opacity,
     heatmapCanvas: createSolarFluxCanvas(state.annualFlux, opacity)
-  };
-}
-
-export function updateSolarDebugLayers(state: ProjectSolarDataState, patch: Partial<SolarDebugLayerState>): ProjectSolarDataState {
-  return {
-    ...state,
-    debugLayers: {
-      ...DEFAULT_SOLAR_DEBUG_LAYERS,
-      ...state.debugLayers,
-      ...patch
-    }
-  };
-}
-
-export function applySolarRegistrationToState(
-  state: ProjectSolarDataState,
-  mapCapture: MapCaptureSettings | undefined,
-  registrationInput: Partial<SolarRegistration>
-): ProjectSolarDataState {
-  const registration = normalizeSolarRegistration(registrationInput);
-  if (state.status !== "ready" || !mapCapture || !state.annualFlux) return { ...state, registration };
-  const transforms = createTransforms(mapCapture, registration, {
-    annualFlux: state.annualFlux,
-    rgb: state.rgb,
-    dsm: state.dsm,
-    mask: state.mask
-  });
-  return {
-    ...state,
-    registration,
-    transform: transforms.annualFlux,
-    transforms
   };
 }
 
