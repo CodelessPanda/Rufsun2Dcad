@@ -23,7 +23,7 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
 
   return (
     <section className="saas-page">
-      <PageHeader title="Workspace Settings" subtitle="Basic company profile" />
+      <PageHeader title="Company Settings" subtitle="Basic company profile" />
       <form
         className="saas-panel settings-form"
         onSubmit={(event) => {
@@ -32,7 +32,7 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
         }}
       >
         <label className="field stacked">
-          <span>Workspace Name</span>
+          <span>Company Name</span>
           <input value={form.name ?? ""} onChange={(event) => update("name", event.target.value)} />
         </label>
         <label className="field stacked">
@@ -101,7 +101,7 @@ export function WorkspaceSettingsPage({ workspace, busy, error, onSave }: Props)
         </section>
         {error && <p className="warning">{error}</p>}
         <button className="primary-action settings-save" disabled={busy || !form.name?.trim()}>
-          {busy ? "Saving..." : "Save Workspace"}
+          {busy ? "Saving..." : "Save Company"}
         </button>
       </form>
     </section>

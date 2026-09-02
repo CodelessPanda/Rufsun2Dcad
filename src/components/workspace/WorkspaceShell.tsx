@@ -1,15 +1,19 @@
 import { Building2, ChevronDown, LayoutDashboard, LogOut, Settings, Users, UserRound, FolderOpen, Plus } from "lucide-react";
 import type { ReactNode } from "react";
-import type { ApiUser, Workspace } from "../../api/types";
+import { can, UiPermissions } from "../../authz/permissions";
+import type { ApiUser, Tenant, Workspace } from "../../api/types";
 
-export type AppView = "dashboard" | "customers" | "customer" | "projects" | "designer" | "team" | "settings";
+export type AppView = "platform" | "tenant" | "dashboard" | "customers" | "customer" | "projects" | "designer" | "team" | "settings" | "profile";
 
 interface Props {
   user: ApiUser;
+  tenants: Tenant[];
   workspaces: Workspace[];
+  activeTenant?: Tenant;
   activeWorkspace: Workspace;
   activeView: AppView;
   children: ReactNode;
+  onTenantChange: (tenantId: string) => void;
   onWorkspaceChange: (workspaceId: string) => void;
   onCreateWorkspace: () => void;
   onNavigate: (view: AppView) => void;
@@ -18,10 +22,13 @@ interface Props {
 
 export function WorkspaceShell({
   user,
+  tenants,
   workspaces,
+  activeTenant,
   activeWorkspace,
   activeView,
   children,
+  onTenantChange,
   onWorkspaceChange,
   onCreateWorkspace,
   onNavigate,
@@ -34,8 +41,21 @@ export function WorkspaceShell({
           <span className="brand-mark">R</span>
           <strong>RufsunCAD</strong>
         </div>
+        {tenants.length > 0 && (
+          <label className="workspace-switcher">
+            <span>Tenant</span>
+            <select value={activeTenant?.id ?? ""} onChange={(event) => onTenantChange(event.target.value)}>
+              {tenants.map((tenant) => (
+                <option key={tenant.id} value={tenant.id}>
+                  {tenant.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown />
+          </label>
+        )}
         <label className="workspace-switcher">
-          <span>Workspace</span>
+          <span>Company</span>
           <select value={activeWorkspace.id} onChange={(event) => onWorkspaceChange(event.target.value)}>
             {workspaces.map((workspace) => (
               <option key={workspace.id} value={workspace.id}>
@@ -46,24 +66,45 @@ export function WorkspaceShell({
           <ChevronDown />
         </label>
         <button className="sidebar-create" onClick={onCreateWorkspace}>
-          <Plus /> Create Workspace
+          <Plus /> Create Company
         </button>
         <nav className="side-nav">
+          {user.platformRole === "super_admin" && (
+            <button className={activeView === "platform" ? "active" : ""} onClick={() => onNavigate("platform")}>
+              <Building2 /> Platform
+            </button>
+          )}
+          {activeTenant?.role && ["owner", "admin", "support"].includes(activeTenant.role) && (
+            <button className={activeView === "tenant" ? "active" : ""} onClick={() => onNavigate("tenant")}>
+              <Building2 /> Tenant
+            </button>
+          )}
           <button className={activeView === "dashboard" ? "active" : ""} onClick={() => onNavigate("dashboard")}>
             <LayoutDashboard /> Dashboard
           </button>
-          <button className={activeView === "customers" || activeView === "customer" ? "active" : ""} onClick={() => onNavigate("customers")}>
-            <UserRound /> Customers
-          </button>
-          <button className={activeView === "projects" || activeView === "designer" ? "active" : ""} onClick={() => onNavigate("projects")}>
-            <FolderOpen /> Projects
-          </button>
+          {can(activeWorkspace.role, UiPermissions.CUSTOMERS_VIEW) && (
+            <button className={activeView === "customers" || activeView === "customer" ? "active" : ""} onClick={() => onNavigate("customers")}>
+              <UserRound /> Customers
+            </button>
+          )}
+          {can(activeWorkspace.role, UiPermissions.PROJECTS_VIEW) && (
+            <button className={activeView === "projects" || activeView === "designer" ? "active" : ""} onClick={() => onNavigate("projects")}>
+              <FolderOpen /> Projects
+            </button>
+          )}
           <span />
-          <button className={activeView === "team" ? "active" : ""} onClick={() => onNavigate("team")}>
-            <Users /> Team
-          </button>
-          <button className={activeView === "settings" ? "active" : ""} onClick={() => onNavigate("settings")}>
-            <Settings /> Settings
+          {can(activeWorkspace.role, UiPermissions.TEAM_VIEW) && (
+            <button className={activeView === "team" ? "active" : ""} onClick={() => onNavigate("team")}>
+              <Users /> Team
+            </button>
+          )}
+          {can(activeWorkspace.role, UiPermissions.SETTINGS_VIEW) && (
+            <button className={activeView === "settings" ? "active" : ""} onClick={() => onNavigate("settings")}>
+              <Settings /> Settings
+            </button>
+          )}
+          <button className={activeView === "profile" ? "active" : ""} onClick={() => onNavigate("profile")}>
+            <UserRound /> Profile
           </button>
         </nav>
         <div className="sidebar-user">

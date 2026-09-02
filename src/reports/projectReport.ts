@@ -2,6 +2,7 @@ import type Konva from "konva";
 import { jsPDF } from "jspdf";
 import { calculateArrayStats } from "../cad/array/array";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs, type EnergyGenerationResult } from "../cad/energy/energyCalculator";
+import { DEFAULT_ELECTRICITY_RATE_INR, CURRENCY_CODE, formatCurrency } from "../cad/finance/currency";
 import { distance, findContainingRoof, formatFeetInches, midpoint, polygonArea } from "../cad/geometry/geometry";
 import { buildRoofAnnualFluxMap } from "../cad/solar/solarAnalysis";
 import { getRoofFluxStatistics } from "../cad/solar/solarStatistics";
@@ -83,7 +84,7 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
     annualFluxByRoofId,
     temperatureCorrectionFactor: 0.95,
     sunlightHours: 6,
-    electricityRate: 0.12
+    electricityRate: DEFAULT_ELECTRICITY_RATE_INR
   });
   const costEstimate = calculateSystemCostEstimate(energy.year.totalCapacity, energy.year.estimatedRevenue);
   const layoutImage = captureObjectLayer(stage) ?? createLayoutPlaceholder(document);
@@ -784,7 +785,7 @@ function createFinanceChart(cost: ReportContext["costEstimate"]) {
       height: height - 132,
       lineColor: cost.paybackYears === null ? "#315b8f" : GREEN,
       fillColor: "rgba(49, 91, 143, 0.14)",
-      valuePrefix: "$"
+      valuePrefix: `${CURRENCY_CODE} `
     });
     if (cost.paybackYears !== null) {
       context.fillStyle = GREEN;
@@ -934,7 +935,7 @@ function drawLineChart(
 
 function formatChartValue(value: number, options: { valuePrefix?: string; valueSuffix?: string }) {
   const rounded = Math.round(value);
-  const absolute = Math.abs(rounded).toLocaleString();
+  const absolute = Math.abs(rounded).toLocaleString("en-IN");
   const sign = rounded < 0 ? "-" : "";
   return `${sign}${options.valuePrefix || ""}${absolute}${options.valueSuffix || ""}`;
 }
@@ -1016,11 +1017,6 @@ function sourceLabel(result: EnergyGenerationResult) {
 
 function fitText(value: string, maxChars: number) {
   return value.length > maxChars ? `${value.slice(0, Math.max(0, maxChars - 1))}.` : value;
-}
-
-function formatCurrency(value: number) {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? "-" : ""}$${Math.abs(rounded).toLocaleString()}`;
 }
 
 function safeFilename(value: string) {

@@ -6,6 +6,7 @@ import type { ProjectSolarDataState, SolarDebugLayerState } from "../../cad/sola
 import { exportProjectReportPdf } from "../../reports/projectReport";
 import { SolarExposurePanel } from "../panels/SolarExposurePanel";
 import type { RoofObject } from "../../types/cad";
+import type { CompanyCommercialSummary } from "../../api/types";
 
 interface Props {
   stageRef: RefObject<Konva.Stage>;
@@ -16,6 +17,7 @@ interface Props {
   onToggleSolarExposure?: (visible: boolean) => void;
   onUpdateSolarDebugLayers?: (patch: Partial<SolarDebugLayerState>) => void;
   onUpdateSolarRegistration?: (patch: Partial<NonNullable<ProjectSolarDataState["registration"]>>, calibrated?: boolean) => void;
+  commercialAccess?: CompanyCommercialSummary | null;
 }
 
 export function TopBar({
@@ -26,7 +28,8 @@ export function TopBar({
   onLoadSolarExposure,
   onToggleSolarExposure,
   onUpdateSolarDebugLayers,
-  onUpdateSolarRegistration
+  onUpdateSolarRegistration,
+  commercialAccess
 }: Props) {
   const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const snapMenuRef = useRef<HTMLDivElement | null>(null);
@@ -42,6 +45,8 @@ export function TopBar({
   const [solarMenuOpen, setSolarMenuOpen] = useState(false);
   const [, setDropdownLayoutTick] = useState(0);
   const selectedRoof = document.objects.find((object): object is RoofObject => object.type === "roof" && selectedIds.includes(object.id));
+  const canLoadSolar = hasEntitlement(commercialAccess, "solar.irradiance");
+  const canExportAdvancedReport = hasEntitlement(commercialAccess, "reports.advanced");
 
   useEffect(() => {
     setProjectNameDraft(document.name);
@@ -100,6 +105,10 @@ export function TopBar({
   };
 
   const exportPdf = () => {
+    if (!canExportAdvancedReport) {
+      window.alert("Your company does not have access to advanced reports.");
+      return;
+    }
     clearSelection();
     requestAnimationFrame(() => {
       void exportProjectReportPdf({ document, stage: stageRef.current, solarExposure });
@@ -150,7 +159,13 @@ export function TopBar({
                   <SolarExposurePanel
                     roof={selectedRoof}
                     solarExposure={solarExposure}
-                    onLoad={onLoadSolarExposure}
+                    onLoad={() => {
+                      if (!canLoadSolar) {
+                        window.alert("Your company does not have access to Solar Irradiance.");
+                        return;
+                      }
+                      onLoadSolarExposure();
+                    }}
                     onToggleVisible={onToggleSolarExposure}
                     onUpdateDebugLayers={onUpdateSolarDebugLayers}
                     onUpdateRegistration={onUpdateSolarRegistration}
@@ -222,6 +237,11 @@ export function TopBar({
       </div>
     </header>
   );
+}
+
+function hasEntitlement(commercialAccess: CompanyCommercialSummary | null | undefined, key: string) {
+  if (!commercialAccess) return true;
+  return Boolean(commercialAccess.subscriptionValid && commercialAccess.entitlements[key]?.enabled);
 }
 
 function dropdownStyle(menuRef: RefObject<HTMLElement>, preferredWidth: number): CSSProperties {

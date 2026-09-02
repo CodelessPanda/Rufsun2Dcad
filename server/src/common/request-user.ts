@@ -6,4 +6,6 @@ export interface RequestUser {
 export interface AuthenticatedRequest {
   user?: RequestUser;
   cookies?: Record<string, string>;
+  headers?: Record<string, string | string[] | undefined>;
+  ip?: string;
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { DEFAULT_ELECTRICITY_RATE_INR } from "../finance/currency";
 import type { RoofObject, SolarPanelObject } from "../../types/cad";
 import { calculateAllPeriods } from "./energyCalculator";
 
@@ -14,12 +15,12 @@ describe("calculateAllPeriods", () => {
       annualFluxByRoofId: { [roof.id]: 1600 },
       temperatureCorrectionFactor: 0.95,
       sunlightHours: 6,
-      electricityRate: 0.12
+      electricityRate: DEFAULT_ELECTRICITY_RATE_INR
     });
 
     expect(results.year.dataSource).toBe("solar-api");
     expect(results.year.totalEnergyKwh).toBe(760);
-    expect(results.year.estimatedRevenue).toBe(91.2);
+    expect(results.year.estimatedRevenue).toBe(6080);
     expect(results.month.totalEnergyKwh).toBeCloseTo(62.47);
     expect(results.year.averageAnnualFlux).toBe(1600);
   });

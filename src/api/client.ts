@@ -2,10 +2,25 @@ import type {
   ApiUser,
   CloudDocument,
   CloudProject,
+  Company,
+  CompanyCommercialSummary,
   CreateCustomerInput,
   CreateProjectInput,
   Customer,
+  Invitation,
+  MembersResponse,
+  MembershipStatus,
+  Plan,
+  PlanCode,
+  SeatType,
+  SubscriptionStatus,
+  Tenant,
+  TenantCommercialSummary,
+  TenantMembersResponse,
+  TenantRole,
+  UserSession,
   Workspace,
+  CompanyRole,
   WorkspaceMember,
   WorkspaceSummary,
   SolarDataLayers
@@ -108,7 +123,7 @@ function googleApiKeyHeaders(apiKey?: string): Record<string, string> {
 
 export const api = {
   baseUrl: API_BASE,
-  async register(input: { name: string; email: string; password: string }) {
+  async register(input: { name: string; email: string; password: string; invitationToken?: string }) {
     const data = await requestJson<{ accessToken: string; expiresIn: number }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(input)
@@ -131,6 +146,75 @@ export const api = {
   me() {
     return requestJson<ApiUser>("/auth/me");
   },
+  forgotPassword(email: string) {
+    return requestJson<{ ok: boolean; resetUrl?: string }>("/auth/password/forgot", { method: "POST", body: JSON.stringify({ email }) });
+  },
+  resetPassword(token: string, password: string) {
+    return requestJson<{ ok: boolean }>("/auth/password/reset", { method: "POST", body: JSON.stringify({ token, password }) });
+  },
+  changePassword(currentPassword: string, newPassword: string) {
+    return requestJson<{ ok: boolean }>("/auth/password/change", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
+  },
+  verifyEmail(token: string) {
+    return requestJson<{ ok: boolean }>("/auth/email/verify", { method: "POST", body: JSON.stringify({ token }) });
+  },
+  sessions() {
+    return requestJson<UserSession[]>("/auth/sessions");
+  },
+  revokeOtherSessions() {
+    return requestJson<{ ok: boolean }>("/auth/sessions/revoke-others", { method: "POST" });
+  },
+  invitation(token: string) {
+    return requestJson<Invitation>(`/invitations/${encodeURIComponent(token)}`);
+  },
+  acceptInvitation(token: string) {
+    return requestJson<Invitation>(`/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });
+  },
+  tenants() {
+    return requestJson<Tenant[]>("/tenants");
+  },
+  adminTenants() {
+    return requestJson<Tenant[]>("/admin/tenants");
+  },
+  createAdminTenant(input: { name: string; type?: Tenant["type"] }) {
+    return requestJson<Tenant>("/admin/tenants", { method: "POST", body: JSON.stringify(input) });
+  },
+  adminTenant(tenantId: string) {
+    return requestJson<Tenant>(`/admin/tenants/${tenantId}`);
+  },
+  updateAdminTenant(tenantId: string, input: Partial<Pick<Tenant, "name" | "type" | "status">>) {
+    return requestJson<Tenant>(`/admin/tenants/${tenantId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  commercialOverview() {
+    return requestJson<Array<Tenant & { commercial: TenantCommercialSummary }>>("/admin/commercial");
+  },
+  commercialPlans() {
+    return requestJson<Plan[]>("/admin/commercial/plans");
+  },
+  updateTenantSubscription(tenantId: string, input: { planCode: PlanCode; status?: SubscriptionStatus; notes?: string }) {
+    return requestJson<unknown>(`/admin/tenants/${tenantId}/subscription`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  updateTenantSeatCapacity(tenantId: string, input: { seatType: Exclude<SeatType, "no_seat">; total?: number; unlimited?: boolean }) {
+    return requestJson<unknown>(`/admin/tenants/${tenantId}/seat-capacity`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  tenantCompanies(tenantId: string) {
+    return requestJson<Company[]>(`/tenants/${tenantId}/companies`);
+  },
+  tenantLicensing(tenantId: string) {
+    return requestJson<TenantCommercialSummary>(`/tenants/${tenantId}/licensing`);
+  },
+  updateCompanySeatAllocation(tenantId: string, companyId: string, input: { seatType: Exclude<SeatType, "no_seat">; allocated?: number; unlimited?: boolean }) {
+    return requestJson<unknown>(`/tenants/${tenantId}/companies/${companyId}/seat-allocation`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  createTenantCompany(tenantId: string, input: { name: string }) {
+    return requestJson<Company>(`/tenants/${tenantId}/companies`, { method: "POST", body: JSON.stringify(input) });
+  },
+  company(companyId: string) {
+    return requestJson<Company>(`/companies/${companyId}`);
+  },
+  updateCompany(companyId: string, input: Partial<Company>) {
+    return requestJson<Company>(`/companies/${companyId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
   workspaces() {
     return requestJson<Workspace[]>("/workspaces");
   },
@@ -146,45 +230,78 @@ export const api = {
   members(workspaceId: string) {
     return requestJson<WorkspaceMember[]>(`/workspaces/${workspaceId}/members`);
   },
+  companyMembers(companyId: string) {
+    return requestJson<MembersResponse>(`/companies/${companyId}/members`);
+  },
+  companyLicensing(companyId: string) {
+    return requestJson<CompanyCommercialSummary>(`/companies/${companyId}/licensing`);
+  },
+  inviteCompanyMember(companyId: string, input: { email: string; role: CompanyRole; seatType: SeatType }) {
+    return requestJson<Invitation>(`/companies/${companyId}/invitations`, { method: "POST", body: JSON.stringify(input) });
+  },
+  updateCompanyMember(companyId: string, membershipId: string, input: { role?: CompanyRole; seatType?: SeatType; status?: MembershipStatus }) {
+    return requestJson<WorkspaceMember>(`/companies/${companyId}/members/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  removeCompanyMember(companyId: string, membershipId: string) {
+    return requestJson<WorkspaceMember>(`/companies/${companyId}/members/${membershipId}`, { method: "DELETE" });
+  },
+  revokeCompanyInvitation(companyId: string, invitationId: string) {
+    return requestJson<Invitation>(`/companies/${companyId}/invitations/${invitationId}`, { method: "DELETE" });
+  },
+  tenantMembers(tenantId: string) {
+    return requestJson<TenantMembersResponse>(`/tenants/${tenantId}/members`);
+  },
+  inviteTenantMember(tenantId: string, input: { email: string; role: TenantRole }) {
+    return requestJson<Invitation>(`/tenants/${tenantId}/invitations`, { method: "POST", body: JSON.stringify(input) });
+  },
+  updateTenantMember(tenantId: string, membershipId: string, input: { role?: TenantRole; status?: MembershipStatus }) {
+    return requestJson<TenantMembersResponse["members"][number]>(`/tenants/${tenantId}/members/${membershipId}`, { method: "PATCH", body: JSON.stringify(input) });
+  },
+  removeTenantMember(tenantId: string, membershipId: string) {
+    return requestJson<TenantMembersResponse["members"][number]>(`/tenants/${tenantId}/members/${membershipId}`, { method: "DELETE" });
+  },
+  revokeTenantInvitation(tenantId: string, invitationId: string) {
+    return requestJson<Invitation>(`/tenants/${tenantId}/invitations/${invitationId}`, { method: "DELETE" });
+  },
   customers(workspaceId: string, search = "") {
     const query = search.trim() ? `?search=${encodeURIComponent(search.trim())}` : "";
-    return requestJson<Customer[]>(`/workspaces/${workspaceId}/customers${query}`);
+    return requestJson<Customer[]>(`/companies/${workspaceId}/customers${query}`);
   },
   createCustomer(workspaceId: string, input: CreateCustomerInput) {
-    return requestJson<Customer>(`/workspaces/${workspaceId}/customers`, { method: "POST", body: JSON.stringify(input) });
+    return requestJson<Customer>(`/companies/${workspaceId}/customers`, { method: "POST", body: JSON.stringify(input) });
   },
   customer(workspaceId: string, customerId: string) {
-    return requestJson<Customer>(`/workspaces/${workspaceId}/customers/${customerId}`);
+    return requestJson<Customer>(`/companies/${workspaceId}/customers/${customerId}`);
   },
   updateCustomer(workspaceId: string, customerId: string, input: Partial<CreateCustomerInput>) {
-    return requestJson<Customer>(`/workspaces/${workspaceId}/customers/${customerId}`, { method: "PATCH", body: JSON.stringify(input) });
+    return requestJson<Customer>(`/companies/${workspaceId}/customers/${customerId}`, { method: "PATCH", body: JSON.stringify(input) });
   },
   archiveCustomer(workspaceId: string, customerId: string) {
-    return requestJson<Customer>(`/workspaces/${workspaceId}/customers/${customerId}/archive`, { method: "POST" });
+    return requestJson<Customer>(`/companies/${workspaceId}/customers/${customerId}/archive`, { method: "POST" });
   },
   projects(workspaceId: string) {
-    return requestJson<CloudProject[]>(`/workspaces/${workspaceId}/projects`);
+    return requestJson<CloudProject[]>(`/companies/${workspaceId}/projects`);
   },
   createProject(workspaceId: string, input: CreateProjectInput) {
-    return requestJson<CloudProject>(`/workspaces/${workspaceId}/projects`, { method: "POST", body: JSON.stringify(input) });
+    return requestJson<CloudProject>(`/companies/${workspaceId}/projects`, { method: "POST", body: JSON.stringify(input) });
   },
   project(workspaceId: string, projectId: string) {
-    return requestJson<CloudProject>(`/workspaces/${workspaceId}/projects/${projectId}`);
+    return requestJson<CloudProject>(`/companies/${workspaceId}/projects/${projectId}`);
   },
   archiveProject(workspaceId: string, projectId: string) {
-    return requestJson<CloudProject>(`/workspaces/${workspaceId}/projects/${projectId}/archive`, { method: "POST" });
+    return requestJson<CloudProject>(`/companies/${workspaceId}/projects/${projectId}/archive`, { method: "POST" });
   },
   document(workspaceId: string, projectId: string) {
-    return requestJson<CloudDocument>(`/workspaces/${workspaceId}/projects/${projectId}/document`);
+    return requestJson<CloudDocument>(`/companies/${workspaceId}/projects/${projectId}/document`);
   },
   saveDocument(workspaceId: string, projectId: string, documentJson: RufsunCadDocument) {
-    return requestJson<CloudDocument>(`/workspaces/${workspaceId}/projects/${projectId}/document`, {
+    return requestJson<CloudDocument>(`/companies/${workspaceId}/projects/${projectId}/document`, {
       method: "PUT",
       body: JSON.stringify({ documentJson, schemaVersion: "1" })
     });
   },
   solarDataLayers(workspaceId: string, projectId: string, googleApiKey?: string) {
-    return requestJson<SolarDataLayers>(`/workspaces/${workspaceId}/projects/${projectId}/solar/data-layers`, {
+    return requestJson<SolarDataLayers>(`/companies/${workspaceId}/projects/${projectId}/solar/data-layers`, {
       headers: googleApiKeyHeaders(googleApiKey)
     });
   },
@@ -193,7 +310,7 @@ export const api = {
   },
   async solarLayerTiff(workspaceId: string, projectId: string, layer: "annual-flux" | "rgb" | "dsm" | "mask", googleApiKey?: string) {
     const path = layer === "annual-flux" ? "annual-flux.tiff" : `layers/${layer}.tiff`;
-    const response = await fetch(`${API_BASE}/workspaces/${workspaceId}/projects/${projectId}/solar/${path}`, {
+    const response = await fetch(`${API_BASE}/companies/${workspaceId}/projects/${projectId}/solar/${path}`, {
       credentials: "include",
       headers: {
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

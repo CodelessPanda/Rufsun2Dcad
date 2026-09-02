@@ -4,14 +4,28 @@ import { SolarService } from "../src/solar/solar.service";
 
 describe("SolarService", () => {
   const access = {
-    requireProject: vi.fn()
+    requireProject: vi.fn(),
+    requireCompanyMembership: vi.fn()
+  };
+  const licenses = {
+    requireSeatCapability: vi.fn()
+  };
+  const commercial = {
+    requireCompanyEntitlement: vi.fn(),
+    requireSolarRequestAvailable: vi.fn(),
+    recordSolarRequest: vi.fn()
   };
   let service: SolarService;
 
   beforeEach(() => {
     vi.restoreAllMocks();
     access.requireProject.mockResolvedValue({ id: "project-a", latitude: 28.6, longitude: 77.2 });
-    service = new SolarService(access as never);
+    access.requireCompanyMembership.mockResolvedValue(undefined);
+    licenses.requireSeatCapability.mockResolvedValue(undefined);
+    commercial.requireCompanyEntitlement.mockResolvedValue(undefined);
+    commercial.requireSolarRequestAvailable.mockResolvedValue(undefined);
+    commercial.recordSolarRequest.mockResolvedValue(undefined);
+    service = new SolarService(access as never, licenses as never, commercial as never);
     process.env.GOOGLE_SOLAR_API_KEY = "solar-key";
   });
 
@@ -26,7 +40,7 @@ describe("SolarService", () => {
       imageryQuality: "HIGH",
       radiusMeters: 50,
       pixelSizeMeters: 0.1,
-      annualFluxDownloadUrl: "/api/workspaces/workspace-a/projects/project-a/solar/annual-flux.tiff"
+      annualFluxDownloadUrl: "/api/companies/workspace-a/projects/project-a/solar/annual-flux.tiff"
     });
   });
 

@@ -1,5 +1,6 @@
 import { findContainingRoof, roofContainsPanel } from "../geometry/geometry";
 import type { SolarPanelObject, RoofObject } from "../../types/cad";
+import { DEFAULT_ELECTRICITY_RATE_INR, DEFAULT_INSTALL_COST_PER_WATT_INR } from "../finance/currency";
 
 export type TimePeriod = "today" | "week" | "month" | "year";
 
@@ -10,7 +11,7 @@ export interface EnergyCalculationParams {
   annualFluxByRoofId?: Record<string, number>; // kWh/kW/year from Google Solar API annual flux layer
   temperatureCorrectionFactor?: number; // Default: 0.95 (accounts for temperature losses)
   sunlightHours?: number; // Default: 6 (average usable sunlight hours per day)
-  electricityRate?: number; // Default: 0.12 ($ per kWh)
+  electricityRate?: number; // Default: INR per kWh
 }
 
 export interface EnergyGenerationResult {
@@ -56,7 +57,7 @@ const dummyWeatherData: DummyWeatherData[] = [
 
 const DEFAULT_TEMPERATURE_FACTOR = 0.95;
 const DEFAULT_SUNLIGHT_HOURS = 6;
-const DEFAULT_ELECTRICITY_RATE = 0.12;
+const DEFAULT_ELECTRICITY_RATE = DEFAULT_ELECTRICITY_RATE_INR;
 
 /**
  * Calculate panel area in square meters
@@ -76,7 +77,7 @@ export function calculateSystemCapacity(panels: SolarPanelObject[]): number {
 export function calculateSystemCostEstimate(
   totalCapacityKwp: number,
   annualSavings: number,
-  costPerWatt = 2.75
+  costPerWatt = DEFAULT_INSTALL_COST_PER_WATT_INR
 ): SystemCostEstimate {
   const systemCost = totalCapacityKwp * 1000 * costPerWatt;
   return {

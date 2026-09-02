@@ -24,15 +24,15 @@ export function WorkspaceOnboarding({ busy, error, onCreateWorkspace, onLogout }
           <span className="brand-mark">R</span>
           <strong>RufsunCAD</strong>
         </div>
-        <h1>Create workspace</h1>
-        <p className="fine-print">This workspace represents your solar company.</p>
+        <h1>Create company</h1>
+        <p className="fine-print">Direct companies are placed under the Rufsun Direct tenant.</p>
         <label className="field stacked">
-          <span>Workspace name</span>
+          <span>Company name</span>
           <input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="ABC Solar Pvt Ltd" />
         </label>
         {error && <p className="warning">{error}</p>}
         <button className="auth-primary" disabled={busy || !name.trim()}>
-          <Building2 /> Create Workspace
+          <Building2 /> Create Company
         </button>
         <button type="button" className="auth-link" onClick={() => void onLogout()}>
           Logout

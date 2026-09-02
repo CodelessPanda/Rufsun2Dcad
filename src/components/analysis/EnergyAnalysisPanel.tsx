@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { TrendingUp, Zap, DollarSign, Gauge, Sun, SlidersHorizontal } from "lucide-react";
+import { TrendingUp, Zap, IndianRupee, Gauge, Sun, SlidersHorizontal } from "lucide-react";
 import { useCadStore } from "../../store/useCadStore";
 import type { RoofObject, SolarPanelObject } from "../../types/cad";
 import type { TimePeriod } from "../../cad/energy/energyCalculator";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs } from "../../cad/energy/energyCalculator";
+import { DEFAULT_ELECTRICITY_RATE_INR, DEFAULT_INSTALL_COST_PER_WATT_INR, ELECTRICITY_RATE_UNIT, formatCurrency, INSTALL_COST_UNIT } from "../../cad/finance/currency";
 import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
 import { buildRoofAnnualFluxMap } from "../../cad/solar/solarAnalysis";
 
@@ -16,10 +17,10 @@ interface Props {
 export function EnergyAnalysisPanel({ solarExposure }: Props) {
   const document = useCadStore((state) => state.document);
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>("month");
-  const [electricityRate, setElectricityRate] = useState(0.12);
+  const [electricityRate, setElectricityRate] = useState(DEFAULT_ELECTRICITY_RATE_INR);
   const [averageRadiance, setAverageRadiance] = useState(800);
   const [sunlightHours, setSunlightHours] = useState(6);
-  const [costPerWatt, setCostPerWatt] = useState(2.75);
+  const [costPerWatt, setCostPerWatt] = useState(DEFAULT_INSTALL_COST_PER_WATT_INR);
 
   const allPanels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
@@ -115,7 +116,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
         <h3>Cost vs Savings</h3>
         <div className="finance-compare">
           <div>
-            <DollarSign size={18} />
+            <IndianRupee size={18} />
             <span>System cost</span>
             <strong>{formatCurrency(costEstimate.systemCost)}</strong>
           </div>
@@ -147,7 +148,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
                 <tr key={period} className={selectedPeriod === period ? "highlighted" : ""}>
                   <td>{period.charAt(0).toUpperCase() + period.slice(1)}</td>
                   <td>{results[period].totalEnergyKwh}</td>
-                  <td>${results[period].estimatedRevenue}</td>
+                  <td>{formatCurrency(results[period].estimatedRevenue)}</td>
                 </tr>
               ))}
             </tbody>
@@ -163,7 +164,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
         <NumberField
           label="Rate"
           value={electricityRate}
-          suffix="$/kWh"
+          suffix={ELECTRICITY_RATE_UNIT}
           min={0}
           step={0.01}
           onChange={setElectricityRate}
@@ -191,7 +192,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
         <NumberField
           label="Install cost"
           value={costPerWatt}
-          suffix="$/W"
+          suffix={INSTALL_COST_UNIT}
           min={0}
           step={0.05}
           onChange={setCostPerWatt}
@@ -205,17 +206,12 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
           <li>{current.dataSource === "solar-api" ? "Energy = Capacity × annual Solar API flux × temperature factor" : "Energy = Capacity × Peak Sun Hours × Performance Ratio"}</li>
           <li>Temperature loss factor: 95%</li>
           <li>{current.dataSource === "solar-api" ? "Solar API data replaces manual irradiance and sunlight assumptions" : "Efficiency based on angle and azimuth"}</li>
-          <li>Rate: configurable (default $0.12/kWh)</li>
+          <li>Rate: configurable (default INR 8/kWh)</li>
           <li>Weather data: dummy forecast (API-ready)</li>
         </ul>
       </section>
     </aside>
   );
-}
-
-function formatCurrency(value: number) {
-  const rounded = Math.round(value);
-  return `${rounded < 0 ? "-" : ""}$${Math.abs(rounded).toLocaleString()}`;
 }
 
 function Stat({ icon, label, value }: { icon?: React.ReactNode; label: string; value: string | number }) {

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from "react";
 import type Konva from "konva";
 import { api, ApiError, getAccessToken } from "./api/client";
-import type { ApiUser, CloudProject, CreateCustomerInput, Customer, Workspace, WorkspaceMember, WorkspaceSummary } from "./api/types";
+import type { ApiUser, CloudProject, CompanyCommercialSummary, CompanyRole, CreateCustomerInput, Customer, Invitation, MembershipStatus, SeatType, Tenant, Workspace, WorkspaceMember, WorkspaceSummary } from "./api/types";
+import { PlatformAdminPage } from "./components/admin/PlatformAdminPage";
 import { AuthScreen } from "./components/auth/AuthScreen";
+import { PasswordResetScreen, VerifyEmailScreen } from "./components/auth/TokenActionScreens";
 import { CadCanvas } from "./components/canvas/CadCanvas";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { CustomerDetailPage } from "./components/customers/CustomerDetailPage";
@@ -17,6 +19,8 @@ import { TopBar } from "./components/layout/TopBar";
 import { PropertiesPanel } from "./components/panels/PropertiesPanel";
 import { ProjectsPage } from "./components/projects/ProjectsPage";
 import { TeamPage } from "./components/workspace/TeamPage";
+import { TenantCompaniesPage } from "./components/tenants/TenantCompaniesPage";
+import { ProfilePage } from "./components/workspace/ProfilePage";
 import { WorkspaceOnboarding } from "./components/workspace/WorkspaceOnboarding";
 import { type AppView, WorkspaceShell } from "./components/workspace/WorkspaceShell";
 import { WorkspaceSettingsPage } from "./components/workspace/WorkspaceSettingsPage";
@@ -57,8 +61,10 @@ export function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState("");
   const [user, setUser] = useState<ApiUser | null>(null);
+  const [tenants, setTenants] = useState<Tenant[]>([]);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWorkspaceId, setActiveWorkspaceId] = useState(() => localStorage.getItem("rufsun.activeWorkspaceId") || "");
+  const [activeTenantId, setActiveTenantId] = useState(() => localStorage.getItem("rufsun.activeTenantId") || "");
   const [workspaceBusy, setWorkspaceBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState("");
   const [appView, setAppView] = useState<AppView>("dashboard");
@@ -68,6 +74,8 @@ export function App() {
   const [localProjects, setLocalProjects] = useState<SavedProject[]>([]);
   const [summary, setSummary] = useState<WorkspaceSummary | undefined>();
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [companyInvitations, setCompanyInvitations] = useState<Invitation[]>([]);
+  const [companyCommercial, setCompanyCommercial] = useState<CompanyCommercialSummary | null>(null);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [preselectedCustomerId, setPreselectedCustomerId] = useState<string | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
@@ -99,7 +107,12 @@ export function App() {
   const setGuides = useCadStore((state) => state.setGuides);
   const toast = useCadStore((state) => state.toast);
 
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? workspaces[0];
+  const activeTenant = tenants.find((tenant) => tenant.id === activeTenantId) ?? tenants.find((tenant) => tenant.id === workspaces[0]?.tenantId) ?? tenants[0];
+  const tenantWorkspaces = activeTenant ? workspaces.filter((workspace) => workspace.tenantId === activeTenant.id) : workspaces;
+  const activeWorkspace = tenantWorkspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? tenantWorkspaces[0] ?? workspaces[0];
+  const inviteToken = window.location.pathname.startsWith("/invite/") ? decodeURIComponent(window.location.pathname.replace("/invite/", "")) : "";
+  const resetToken = window.location.pathname.startsWith("/reset-password/") ? decodeURIComponent(window.location.pathname.replace("/reset-password/", "")) : "";
+  const verifyEmailToken = window.location.pathname.startsWith("/verify-email/") ? decodeURIComponent(window.location.pathname.replace("/verify-email/", "")) : "";
 
   useEffect(() => {
     localStorage.setItem("rufsun.panelWidth", String(panelWidth));
@@ -108,6 +121,23 @@ export function App() {
   useEffect(() => {
     if (activeWorkspaceId) localStorage.setItem("rufsun.activeWorkspaceId", activeWorkspaceId);
   }, [activeWorkspaceId]);
+
+  useEffect(() => {
+    if (activeTenantId) localStorage.setItem("rufsun.activeTenantId", activeTenantId);
+  }, [activeTenantId]);
+
+  useEffect(() => {
+    if (!activeTenant || activeWorkspace?.tenantId === activeTenant.id) return;
+    const nextCompany = workspaces.find((workspace) => workspace.tenantId === activeTenant.id);
+    setActiveWorkspaceId(nextCompany?.id ?? "");
+    setCustomers([]);
+    setProjects([]);
+    setMembers([]);
+    setCompanyInvitations([]);
+    setCompanyCommercial(null);
+    setSelectedCustomer(null);
+    setActiveProjectId(null);
+  }, [activeTenant, activeWorkspace?.tenantId, workspaces]);
 
   useEffect(() => {
     const onResize = () => {
@@ -122,9 +152,9 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!activeWorkspaceId || !user) return;
-    void refreshWorkspaceData(activeWorkspaceId);
-  }, [activeWorkspaceId, user]);
+    if (!activeWorkspace?.id || !user) return;
+    void refreshWorkspaceData(activeWorkspace.id);
+  }, [activeWorkspace?.id, user]);
 
   useEffect(() => {
     if (viewMode === "energy") {
@@ -200,13 +230,19 @@ export function App() {
         api.customers(workspaceId),
         api.projects(workspaceId),
         api.workspaceSummary(workspaceId),
-        api.members(workspaceId),
+        api.companyMembers(workspaceId),
         listProjects()
       ]);
       setCustomers(nextCustomers);
       setProjects(nextProjects);
       setSummary(nextSummary);
-      setMembers(nextMembers);
+      setMembers(nextMembers.members);
+      setCompanyInvitations(nextMembers.invitations);
+      try {
+        setCompanyCommercial(await api.companyLicensing(workspaceId));
+      } catch {
+        setCompanyCommercial(null);
+      }
       setLocalProjects(nextLocalProjects);
       setWorkspaceError("");
     } catch (error) {
@@ -219,13 +255,20 @@ export function App() {
     try {
       if (!getAccessToken()) return;
       const nextUser = await api.me();
-      const nextWorkspaces = await api.workspaces();
+      const [nextTenants, nextWorkspaces] = await Promise.all([api.tenants(), api.workspaces()]);
       setUser(nextUser);
+      setTenants(nextTenants);
       setWorkspaces(nextWorkspaces);
       const savedWorkspace = nextWorkspaces.find((workspace) => workspace.id === activeWorkspaceId);
+      const savedTenant = nextTenants.find((tenant) => tenant.id === activeTenantId);
+      const nextCompany = savedWorkspace ?? nextWorkspaces[0];
+      const nextTenant = savedTenant ?? nextTenants.find((tenant) => tenant.id === nextCompany?.tenantId) ?? nextTenants[0];
+      setActiveTenantId(nextTenant?.id ?? "");
       setActiveWorkspaceId((savedWorkspace ?? nextWorkspaces[0])?.id ?? "");
+      if (nextUser.platformRole === "super_admin" && !nextCompany) setAppView("platform");
     } catch {
       setUser(null);
+      setTenants([]);
       setWorkspaces([]);
     } finally {
       setBooting(false);
@@ -238,6 +281,7 @@ export function App() {
     setAuthError("");
     try {
       await api.login({ email, password });
+      if (inviteToken) await api.acceptInvitation(inviteToken);
       await restoreSession();
     } catch (error) {
       setAuthError(formatError(error));
@@ -250,7 +294,7 @@ export function App() {
     setAuthBusy(true);
     setAuthError("");
     try {
-      await api.register({ name, email, password });
+      await api.register({ name, email, password, invitationToken: inviteToken || undefined });
       await restoreSession();
     } catch (error) {
       setAuthError(formatError(error));
@@ -262,8 +306,10 @@ export function App() {
   const handleLogout = async () => {
     await api.logout();
     setUser(null);
+    setTenants([]);
     setWorkspaces([]);
     setActiveWorkspaceId("");
+    setActiveTenantId("");
     setAppView("dashboard");
     setActiveProjectId(null);
   };
@@ -273,8 +319,10 @@ export function App() {
     setWorkspaceError("");
     try {
       const workspace = await api.createWorkspace({ name });
-      const nextWorkspaces = await api.workspaces();
+      const [nextTenants, nextWorkspaces] = await Promise.all([api.tenants(), api.workspaces()]);
+      setTenants(nextTenants);
       setWorkspaces(nextWorkspaces);
+      setActiveTenantId(workspace.tenantId);
       setActiveWorkspaceId(workspace.id);
       setAppView("dashboard");
     } catch (error) {
@@ -282,6 +330,71 @@ export function App() {
     } finally {
       setWorkspaceBusy(false);
     }
+  };
+
+  const refreshSaasContext = async () => {
+    const [nextTenants, nextWorkspaces] = await Promise.all([api.tenants(), api.workspaces()]);
+    setTenants(nextTenants);
+    setWorkspaces(nextWorkspaces);
+    const validCompany = nextWorkspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? nextWorkspaces[0];
+    const validTenant = nextTenants.find((tenant) => tenant.id === activeTenantId) ?? nextTenants.find((tenant) => tenant.id === validCompany?.tenantId) ?? nextTenants[0];
+    setActiveTenantId(validTenant?.id ?? "");
+    setActiveWorkspaceId(validCompany?.id ?? "");
+  };
+
+  const handleTenantChange = (tenantId: string) => {
+    const nextCompany = workspaces.find((workspace) => workspace.tenantId === tenantId);
+    setActiveTenantId(tenantId);
+    setActiveWorkspaceId(nextCompany?.id ?? "");
+    setSelectedCustomer(null);
+    setActiveProjectId(null);
+    setCustomers([]);
+    setProjects([]);
+    setMembers([]);
+    setCompanyInvitations([]);
+    setCompanyCommercial(null);
+    setSummary(undefined);
+    setAppView(nextCompany ? "dashboard" : "tenant");
+  };
+
+  const handleCompanyChange = (workspaceId: string) => {
+    const nextCompany = workspaces.find((workspace) => workspace.id === workspaceId);
+    if (!nextCompany) return;
+    setActiveTenantId(nextCompany.tenantId);
+    setActiveWorkspaceId(workspaceId);
+    setSelectedCustomer(null);
+    setActiveProjectId(null);
+    setCustomers([]);
+    setProjects([]);
+    setMembers([]);
+    setCompanyInvitations([]);
+    setCompanyCommercial(null);
+    setSummary(undefined);
+    setAppView("dashboard");
+  };
+
+  const inviteCompanyMember = async (input: { email: string; role: CompanyRole; seatType: SeatType }) => {
+    if (!activeWorkspaceId) return;
+    await api.inviteCompanyMember(activeWorkspaceId, input);
+    await refreshWorkspaceData(activeWorkspaceId);
+  };
+
+  const updateCompanyMember = async (membershipId: string, input: { role?: CompanyRole; seatType?: SeatType; status?: MembershipStatus }) => {
+    if (!activeWorkspaceId) return;
+    await api.updateCompanyMember(activeWorkspaceId, membershipId, input);
+    await refreshWorkspaceData(activeWorkspaceId);
+  };
+
+  const removeCompanyMember = async (membershipId: string) => {
+    if (!activeWorkspaceId) return;
+    await api.removeCompanyMember(activeWorkspaceId, membershipId);
+    await refreshWorkspaceData(activeWorkspaceId);
+  };
+
+  const revokeCompanyInvitation = async (invitationId: string) => {
+    if (!activeWorkspaceId) return;
+    await api.revokeCompanyInvitation(activeWorkspaceId, invitationId);
+    await refreshWorkspaceData(activeWorkspaceId);
   };
 
   const createCustomer = async (input: CreateCustomerInput) => {
@@ -519,6 +632,8 @@ export function App() {
   };
 
   if (booting) return <div className="loading-screen">Loading RufsunCAD...</div>;
+  if (resetToken) return <PasswordResetScreen token={resetToken} />;
+  if (verifyEmailToken) return <VerifyEmailScreen token={verifyEmailToken} />;
   if (!user) {
     return (
       <AuthScreen
@@ -528,10 +643,20 @@ export function App() {
         onModeChange={setAuthMode}
         onLogin={handleLogin}
         onRegister={handleRegister}
+        onForgotPassword={async (email) => {
+          await api.forgotPassword(email);
+        }}
       />
     );
   }
   if (!activeWorkspace) {
+    if (user.platformRole === "super_admin") {
+      return (
+        <ErrorBoundary>
+          <PlatformAdminPage onChanged={refreshSaasContext} onLogout={handleLogout} />
+        </ErrorBoundary>
+      );
+    }
     return <WorkspaceOnboarding busy={workspaceBusy} error={workspaceError} onCreateWorkspace={createWorkspace} onLogout={handleLogout} />;
   }
 
@@ -551,6 +676,7 @@ export function App() {
             onToggleSolarExposure={(visible) => setSolarExposure((current) => ({ ...current, visible }))}
             onUpdateSolarDebugLayers={(patch) => setSolarExposure((current) => updateSolarDebugLayers(current, patch))}
             onUpdateSolarRegistration={updateSolarRegistration}
+            commercialAccess={companyCommercial}
           />
           <main className="editor-grid" style={{ "--panel-width": `${panelWidth}px` } as CSSProperties}>
             {viewMode === "editor" ? (
@@ -558,7 +684,7 @@ export function App() {
                 <LeftToolbar viewMode={viewMode} setViewMode={setViewMode} />
                 <CadCanvas stageRef={stageRef} solarExposure={solarExposure} />
                 <div className="panel-resize-handle" onMouseDown={startResize} />
-                <PropertiesPanel />
+                <PropertiesPanel commercialAccess={companyCommercial} />
               </>
             ) : (
               <>
@@ -581,17 +707,15 @@ export function App() {
     <ErrorBoundary>
       <WorkspaceShell
         user={user}
+        tenants={tenants}
         workspaces={workspaces}
+        activeTenant={activeTenant}
         activeWorkspace={activeWorkspace}
         activeView={appView}
-        onWorkspaceChange={(workspaceId) => {
-          setActiveWorkspaceId(workspaceId);
-          setSelectedCustomer(null);
-          setActiveProjectId(null);
-          setAppView("dashboard");
-        }}
+        onTenantChange={handleTenantChange}
+        onWorkspaceChange={handleCompanyChange}
         onCreateWorkspace={() => {
-          const name = window.prompt("Workspace name");
+          const name = window.prompt("Company name");
           if (name?.trim()) void createWorkspace(name.trim());
         }}
         onNavigate={(view) => {
@@ -600,6 +724,16 @@ export function App() {
         }}
         onLogout={handleLogout}
       >
+        {appView === "platform" && <PlatformAdminPage onChanged={refreshSaasContext} />}
+        {appView === "tenant" && activeTenant && (
+          <TenantCompaniesPage
+            tenant={activeTenant}
+            companies={tenantWorkspaces}
+            activeCompanyId={activeWorkspace.id}
+            onCompanyChange={handleCompanyChange}
+            onChanged={refreshSaasContext}
+          />
+        )}
         {appView === "dashboard" && (
           <DashboardPage summary={summary} projects={projects} customers={customers} onOpenProject={(id) => void openCloudProject(id)} />
         )}
@@ -639,7 +773,18 @@ export function App() {
             )}
           </>
         )}
-        {appView === "team" && <TeamPage members={members} />}
+        {appView === "team" && (
+          <TeamPage
+            members={members}
+            invitations={companyInvitations}
+            licensing={companyCommercial}
+            activeRole={activeWorkspace.role}
+            onInvite={inviteCompanyMember}
+            onUpdateMember={updateCompanyMember}
+            onRemoveMember={removeCompanyMember}
+            onRevokeInvitation={revokeCompanyInvitation}
+          />
+        )}
         {appView === "settings" && (
           <WorkspaceSettingsPage
             workspace={activeWorkspace}
@@ -649,7 +794,7 @@ export function App() {
               setWorkspaceBusy(true);
               setWorkspaceError("");
               try {
-                await api.updateWorkspace(activeWorkspace.id, input);
+                await api.updateCompany(activeWorkspace.id, input);
                 setWorkspaces(await api.workspaces());
               } catch (error) {
                 setWorkspaceError(formatError(error));
@@ -658,6 +803,9 @@ export function App() {
               }
             }}
           />
+        )}
+        {appView === "profile" && activeTenant && (
+          <ProfilePage user={user} activeTenant={activeTenant} activeWorkspace={activeWorkspace} />
         )}
       </WorkspaceShell>
       <NewProjectDialog

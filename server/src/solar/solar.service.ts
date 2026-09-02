@@ -1,5 +1,9 @@
 import { BadRequestException, Inject, Injectable, InternalServerErrorException, NotFoundException } from "@nestjs/common";
-import { WorkspaceAccessService } from "../common/workspace-access.service";
+import { AccessControlService } from "../common/access-control.service";
+import { LicenseCapabilityService } from "../common/license-capability.service";
+import { Permissions, ProductCapabilities } from "../common/permissions";
+import { CommercialService } from "../commercial/commercial.service";
+import { Entitlements } from "../commercial/commercial.constants";
 
 const SOLAR_DATA_RADIUS_METERS = 50;
 const SOLAR_PIXEL_SIZE_METERS = 0.1;
@@ -37,10 +41,17 @@ interface CachedLayers {
 export class SolarService {
   private readonly cache = new Map<string, CachedLayers>();
 
-  constructor(@Inject(WorkspaceAccessService) private readonly access: WorkspaceAccessService) {}
+  constructor(
+    @Inject(AccessControlService) private readonly access: AccessControlService,
+    @Inject(LicenseCapabilityService) private readonly licenses: LicenseCapabilityService,
+    @Inject(CommercialService) private readonly commercial: CommercialService
+  ) {}
 
-  async getDataLayers(userId: string, workspaceId: string, projectId: string, clientGoogleApiKey?: string) {
-    const project = await this.access.requireProject(userId, workspaceId, projectId);
+  async getDataLayers(userId: string, companyId: string, projectId: string, clientGoogleApiKey?: string) {
+    const project = await this.access.requireProject(userId, companyId, projectId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.SOLAR_LOAD);
+    await this.commercial.requireCompanyEntitlement(companyId, Entitlements.SOLAR_IRRADIANCE);
+    await this.licenses.requireSeatCapability(userId, companyId, ProductCapabilities.SOLAR_ANALYSIS);
     const latitude = project.latitude;
     const longitude = project.longitude;
     if (typeof latitude !== "number" || typeof longitude !== "number") {
@@ -54,9 +65,10 @@ export class SolarService {
       nearlySame(cached.latitude, latitude) &&
       nearlySame(cached.longitude, longitude)
     ) {
-      return this.toClientResponse(workspaceId, projectId, cached.data, cached.loadedAt);
+      return this.toClientResponse(companyId, projectId, cached.data, cached.loadedAt);
     }
 
+    await this.commercial.requireSolarRequestAvailable(companyId);
     const apiKey = resolveGoogleSolarApiKey(clientGoogleApiKey);
 
     const params = new URLSearchParams({
@@ -78,16 +90,17 @@ export class SolarService {
     }
     if (!data.annualFluxUrl) throw new NotFoundException("Annual solar flux layer is not available for this location.");
 
+    await this.commercial.recordSolarRequest(companyId);
     this.cache.set(projectId, { projectId, latitude, longitude, loadedAt: Date.now(), data });
-    return this.toClientResponse(workspaceId, projectId, data, Date.now());
+    return this.toClientResponse(companyId, projectId, data, Date.now());
   }
 
-  async downloadAnnualFlux(userId: string, workspaceId: string, projectId: string, clientGoogleApiKey?: string) {
-    return this.downloadLayer(userId, workspaceId, projectId, "annual-flux", clientGoogleApiKey);
+  async downloadAnnualFlux(userId: string, companyId: string, projectId: string, clientGoogleApiKey?: string) {
+    return this.downloadLayer(userId, companyId, projectId, "annual-flux", clientGoogleApiKey);
   }
 
-  async downloadLayer(userId: string, workspaceId: string, projectId: string, layer: SolarLayerKind, clientGoogleApiKey?: string) {
-    const layers = await this.getRawDataLayers(userId, workspaceId, projectId, clientGoogleApiKey);
+  async downloadLayer(userId: string, companyId: string, projectId: string, layer: SolarLayerKind, clientGoogleApiKey?: string) {
+    const layers = await this.getRawDataLayers(userId, companyId, projectId, clientGoogleApiKey);
     const urlKey = SOLAR_LAYER_URL_KEYS[layer];
     if (!urlKey) throw new BadRequestException("Unknown Solar layer requested.");
     const layerUrl = layers[urlKey];
@@ -106,14 +119,14 @@ export class SolarService {
     };
   }
 
-  private async getRawDataLayers(userId: string, workspaceId: string, projectId: string, clientGoogleApiKey?: string) {
-    await this.getDataLayers(userId, workspaceId, projectId, clientGoogleApiKey);
+  private async getRawDataLayers(userId: string, companyId: string, projectId: string, clientGoogleApiKey?: string) {
+    await this.getDataLayers(userId, companyId, projectId, clientGoogleApiKey);
     const cached = this.cache.get(projectId);
     if (!cached) throw new NotFoundException("Solar data cache is unavailable.");
     return cached.data;
   }
 
-  private toClientResponse(workspaceId: string, projectId: string, data: SolarDataLayersResponse, loadedAt: number) {
+  private toClientResponse(companyId: string, projectId: string, data: SolarDataLayersResponse, loadedAt: number) {
     return {
       imageryDate: data.imageryDate,
       imageryProcessedDate: data.imageryProcessedDate,
@@ -124,10 +137,10 @@ export class SolarService {
       hasMask: Boolean(data.maskUrl),
       radiusMeters: SOLAR_DATA_RADIUS_METERS,
       pixelSizeMeters: SOLAR_PIXEL_SIZE_METERS,
-      annualFluxDownloadUrl: `/api/workspaces/${workspaceId}/projects/${projectId}/solar/annual-flux.tiff`,
-      rgbDownloadUrl: data.rgbUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/rgb.tiff` : undefined,
-      dsmDownloadUrl: data.dsmUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/dsm.tiff` : undefined,
-      maskDownloadUrl: data.maskUrl ? `/api/workspaces/${workspaceId}/projects/${projectId}/solar/layers/mask.tiff` : undefined,
+      annualFluxDownloadUrl: `/api/companies/${companyId}/projects/${projectId}/solar/annual-flux.tiff`,
+      rgbDownloadUrl: data.rgbUrl ? `/api/companies/${companyId}/projects/${projectId}/solar/layers/rgb.tiff` : undefined,
+      dsmDownloadUrl: data.dsmUrl ? `/api/companies/${companyId}/projects/${projectId}/solar/layers/dsm.tiff` : undefined,
+      maskDownloadUrl: data.maskUrl ? `/api/companies/${companyId}/projects/${projectId}/solar/layers/mask.tiff` : undefined,
       loadedAt: new Date(loadedAt).toISOString()
     };
   }

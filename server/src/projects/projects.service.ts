@@ -1,7 +1,10 @@
-import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma.service";
-import { WorkspaceAccessService } from "../common/workspace-access.service";
+import { AccessControlService } from "../common/access-control.service";
+import { Permissions } from "../common/permissions";
+import { CommercialService } from "../commercial/commercial.service";
+import { Entitlements } from "../commercial/commercial.constants";
 import type { CreateProjectDto } from "./dto/create-project.dto";
 import type { UpdateProjectDto } from "./dto/update-project.dto";
 
@@ -9,13 +12,14 @@ import type { UpdateProjectDto } from "./dto/update-project.dto";
 export class ProjectsService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(WorkspaceAccessService) private readonly access: WorkspaceAccessService
+    @Inject(AccessControlService) private readonly access: AccessControlService,
+    @Inject(CommercialService) private readonly commercial: CommercialService
   ) {}
 
-  async list(userId: string, workspaceId: string) {
-    await this.access.requireMember(userId, workspaceId);
+  async list(userId: string, companyId: string) {
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.PROJECT_VIEW);
     return this.prisma.project.findMany({
-      where: { workspaceId, archivedAt: null },
+      where: { companyId, archivedAt: null },
       include: {
         customer: { select: { id: true, name: true, companyName: true, phone: true, email: true } },
         document: { select: { updatedAt: true, schemaVersion: true } }
@@ -24,12 +28,15 @@ export class ProjectsService {
     });
   }
 
-  async create(userId: string, workspaceId: string, dto: CreateProjectDto) {
-    const customer = await this.access.requireCustomer(userId, workspaceId, dto.customerId);
+  async create(userId: string, companyId: string, dto: CreateProjectDto) {
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.PROJECT_CREATE);
+    await this.ensureProjectLimit(companyId);
+    const customer = await this.access.requireCustomer(userId, companyId, dto.customerId);
+    if (customer.companyId !== companyId) throw new BadRequestException("The customer does not belong to this company.");
     const summary = summarizeDocument(dto.documentJson);
     return this.prisma.project.create({
       data: {
-        workspaceId,
+        companyId,
         customerId: customer.id,
         name: dto.name.trim(),
         description: clean(dto.description),
@@ -49,7 +56,7 @@ export class ProjectsService {
         panelCount: summary.panelCount,
         document: {
           create: {
-            workspaceId,
+            companyId,
             documentJson: (dto.documentJson ?? minimalDocument(dto.name, customer.name, dto.address)) as Prisma.InputJsonValue,
             schemaVersion: dto.schemaVersion ?? "1"
           }
@@ -59,18 +66,20 @@ export class ProjectsService {
     });
   }
 
-  async get(userId: string, workspaceId: string, projectId: string) {
-    await this.access.requireProject(userId, workspaceId, projectId);
+  async get(userId: string, companyId: string, projectId: string) {
+    await this.access.requireProject(userId, companyId, projectId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.PROJECT_VIEW);
     const project = await this.prisma.project.findFirst({
-      where: { id: projectId, workspaceId, archivedAt: null },
+      where: { id: projectId, companyId, archivedAt: null },
       include: { customer: true, document: { select: { updatedAt: true, schemaVersion: true } } }
     });
     if (!project) throw new NotFoundException("Project not found");
     return project;
   }
 
-  async update(userId: string, workspaceId: string, projectId: string, dto: UpdateProjectDto) {
-    await this.access.requireProject(userId, workspaceId, projectId);
+  async update(userId: string, companyId: string, projectId: string, dto: UpdateProjectDto) {
+    await this.access.requireProject(userId, companyId, projectId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.PROJECT_UPDATE);
     return this.prisma.project.update({
       where: { id: projectId },
       data: {
@@ -92,9 +101,17 @@ export class ProjectsService {
     });
   }
 
-  async archive(userId: string, workspaceId: string, projectId: string) {
-    await this.access.requireProject(userId, workspaceId, projectId);
+  async archive(userId: string, companyId: string, projectId: string) {
+    await this.access.requireProject(userId, companyId, projectId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.PROJECT_ARCHIVE);
     return this.prisma.project.update({ where: { id: projectId }, data: { archivedAt: new Date(), status: "archived", updatedById: userId } });
+  }
+
+  private async ensureProjectLimit(companyId: string) {
+    const limit = await this.commercial.getCompanyLimit(companyId, Entitlements.PROJECTS_MAX);
+    if (typeof limit !== "number") return;
+    const projects = await this.prisma.project.count({ where: { companyId, archivedAt: null } });
+    if (projects >= limit) throw new ForbiddenException("This company has reached its project allowance.");
   }
 }
 

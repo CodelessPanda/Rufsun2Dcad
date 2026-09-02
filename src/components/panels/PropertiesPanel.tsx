@@ -6,8 +6,9 @@ import { sampleSolarModules } from "../../data/sampleSolarModules";
 import { buildSolarArray } from "../../cad/array/array";
 import { formatMetric, polygonArea, distance, angle, getBoundingBox, panelOverlapsExisting, pointInsidePolygon, roofContainsPanel, rotatePoint } from "../../cad/geometry/geometry";
 import { createSolarPanel, nextZ } from "../../cad/objects/factory";
+import type { CompanyCommercialSummary } from "../../api/types";
 
-export function PropertiesPanel() {
+export function PropertiesPanel({ commercialAccess }: { commercialAccess?: CompanyCommercialSummary | null }) {
   const document = useCadStore((state) => state.document);
   const selectedIds = useCadStore((state) => state.selectedIds);
   const activeTool = useCadStore((state) => state.activeTool);
@@ -31,7 +32,7 @@ export function PropertiesPanel() {
         <MultiSelection objects={selectedObjects} />
       )}
 
-      {activeTool === "solar" && <SolarLayoutTools />}
+      {activeTool === "solar" && <SolarLayoutTools canAutoFill={hasEntitlement(commercialAccess, "layout.auto_fill")} />}
 
       <section className="panel-section">
         <h2>Layers</h2>
@@ -82,7 +83,7 @@ function DocumentSummary() {
   );
 }
 
-function SolarLayoutTools() {
+function SolarLayoutTools({ canAutoFill }: { canAutoFill: boolean }) {
   const document = useCadStore((state) => state.document);
   const selectedModuleId = useCadStore((state) => state.selectedModuleId);
   const setSelectedModuleId = useCadStore((state) => state.setSelectedModuleId);
@@ -138,6 +139,10 @@ function SolarLayoutTools() {
   };
 
   const autoFill = () => {
+    if (!canAutoFill) {
+      showToast("Your company does not have access to Auto Fill.");
+      return;
+    }
     if (!activeRoof) return;
     const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
     const layerId = preferredSolarLayer(document);
@@ -200,7 +205,7 @@ function SolarLayoutTools() {
         <button className="primary-action" onClick={addGrid} disabled={!activeRoof}>
           Create Grid
         </button>
-        <button className="secondary-action" onClick={autoFill} disabled={!activeRoof}>
+        <button className="secondary-action" onClick={autoFill} disabled={!activeRoof || !canAutoFill}>
           Auto Fill Roof
         </button>
       </div>
@@ -549,6 +554,11 @@ function createPanelsForRoofGrid({
   }
 
   return { panels, skipped };
+}
+
+function hasEntitlement(commercialAccess: CompanyCommercialSummary | null | undefined, key: string) {
+  if (!commercialAccess) return true;
+  return Boolean(commercialAccess.subscriptionValid && commercialAccess.entitlements[key]?.enabled);
 }
 
 function boundsFromPoints(points: Array<{ x: number; y: number }>) {

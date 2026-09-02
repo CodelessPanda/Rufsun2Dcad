@@ -1,9 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { COMMERCIAL_SEATS, PLAN_DEFINITIONS } from "../src/commercial/commercial.constants";
 
 const prisma = new PrismaClient();
 
 async function main() {
+  await seedPlans();
   const email = "demo@rufsun.local";
   const passwordHash = await bcrypt.hash("Demo12345", 12);
   const user = await prisma.user.upsert({
@@ -12,14 +14,46 @@ async function main() {
     create: {
       name: "Demo Owner",
       email,
-      passwordHash
+      passwordHash,
+      emailVerifiedAt: new Date()
     }
   });
 
-  const workspace = await prisma.workspace.upsert({
-    where: { slug: "rufsun-demo-solar" },
-    update: {},
+  await prisma.user.upsert({
+    where: { email: "admin@rufsun.local" },
+    update: { platformRole: "super_admin" },
     create: {
+      name: "Rufsun Super Admin",
+      email: "admin@rufsun.local",
+      passwordHash: await bcrypt.hash("Admin12345", 12),
+      platformRole: "super_admin",
+      emailVerifiedAt: new Date()
+    }
+  });
+
+  const tenant = await prisma.tenant.upsert({
+    where: { slug: "rufsun-direct" },
+    update: { name: "Rufsun Direct", type: "direct", status: "active" },
+    create: {
+      id: "00000000-0000-4000-8000-000000000001",
+      name: "Rufsun Direct",
+      slug: "rufsun-direct",
+      type: "direct",
+      status: "active"
+    }
+  });
+
+  await prisma.tenantMembership.upsert({
+    where: { tenantId_userId: { tenantId: tenant.id, userId: user.id } },
+    update: { role: "owner", status: "active", joinedAt: new Date() },
+    create: { tenantId: tenant.id, userId: user.id, role: "owner", status: "active", joinedAt: new Date() }
+  });
+
+  const company = await prisma.company.upsert({
+    where: { tenantId_slug: { tenantId: tenant.id, slug: "rufsun-demo-solar" } },
+    update: { tenantId: tenant.id },
+    create: {
+      tenantId: tenant.id,
       name: "Rufsun Demo Solar",
       slug: "rufsun-demo-solar",
       email: "hello@rufsun.local",
@@ -29,7 +63,8 @@ async function main() {
       members: {
         create: {
           userId: user.id,
-          role: "owner",
+          role: "company_owner",
+          seatType: "designer",
           status: "active",
           joinedAt: new Date()
         }
@@ -37,12 +72,20 @@ async function main() {
     }
   });
 
+  await prisma.companyMembership.upsert({
+    where: { companyId_userId: { companyId: company.id, userId: user.id } },
+    update: { role: "company_owner", seatType: "designer", status: "active", joinedAt: new Date() },
+    create: { companyId: company.id, userId: user.id, role: "company_owner", seatType: "designer", status: "active", joinedAt: new Date() }
+  });
+
+  await seedInternalCommercial(tenant.id, company.id, user.id);
+
   const rajesh = await prisma.customer.upsert({
     where: { id: "00000000-0000-0000-0000-000000000101" },
     update: {},
     create: {
       id: "00000000-0000-0000-0000-000000000101",
-      workspaceId: workspace.id,
+      companyId: company.id,
       createdById: user.id,
       name: "Rajesh Sharma",
       phone: "9876543210",
@@ -57,7 +100,7 @@ async function main() {
     update: {},
     create: {
       id: "00000000-0000-0000-0000-000000000102",
-      workspaceId: workspace.id,
+      companyId: company.id,
       createdById: user.id,
       customerType: "business",
       name: "ABC Industries",
@@ -68,20 +111,85 @@ async function main() {
     }
   });
 
-  await seedProject(workspace.id, user.id, rajesh.id, "Rohini Residence", "Rohini, Delhi");
-  await seedProject(workspace.id, user.id, abc.id, "Noida Factory", "Noida, Uttar Pradesh");
+  await seedProject(company.id, user.id, rajesh.id, "Rohini Residence", "Rohini, Delhi");
+  await seedProject(company.id, user.id, abc.id, "Noida Factory", "Noida, Uttar Pradesh");
 
   console.log("Seeded RufsunCAD demo data");
   console.log("Login: demo@rufsun.local / Demo12345");
+  console.log("Super admin: admin@rufsun.local / Admin12345");
 }
 
-async function seedProject(workspaceId: string, userId: string, customerId: string, name: string, address: string) {
-  const existing = await prisma.project.findFirst({ where: { workspaceId, customerId, name } });
+async function seedPlans() {
+  for (const definition of PLAN_DEFINITIONS) {
+    const plan = await prisma.plan.upsert({
+      where: { code: definition.code },
+      update: {
+        name: definition.name,
+        description: definition.description,
+        isSystem: true,
+        isActive: true
+      },
+      create: {
+        code: definition.code,
+        name: definition.name,
+        description: definition.description,
+        isSystem: true,
+        isActive: true
+      }
+    });
+    for (const entitlement of definition.entitlements) {
+      await prisma.planEntitlement.upsert({
+        where: { planId_key: { planId: plan.id, key: entitlement.key } },
+        update: {
+          enabled: entitlement.enabled ?? true,
+          limit: entitlement.limit ?? null
+        },
+        create: {
+          planId: plan.id,
+          key: entitlement.key,
+          enabled: entitlement.enabled ?? true,
+          limit: entitlement.limit ?? null
+        }
+      });
+    }
+  }
+}
+
+async function seedInternalCommercial(tenantId: string, companyId: string, userId: string) {
+  const plan = await prisma.plan.findUnique({ where: { code: "internal" } });
+  if (!plan) return;
+  await prisma.subscription.upsert({
+    where: { companyId },
+    update: { planId: plan.id, status: "active", billingMode: "manual" },
+    create: {
+      scope: "company",
+      tenantId,
+      companyId,
+      planId: plan.id,
+      status: "active",
+      billingMode: "manual",
+      startsAt: new Date(),
+      createdById: userId
+    }
+  });
+  await Promise.all(
+    COMMERCIAL_SEATS.map((seatType) =>
+      prisma.companySeatAllocation.upsert({
+        where: { companyId_seatType: { companyId, seatType } },
+        update: { allocated: null, unlimited: true },
+        create: { companyId, seatType, allocated: null, unlimited: true }
+      })
+    )
+  );
+}
+
+async function seedProject(companyId: string, userId: string, customerId: string, name: string, address: string) {
+  const existing = await prisma.project.findFirst({ where: { companyId, customerId, name } });
   if (existing) return existing;
   const now = new Date().toISOString();
   return prisma.project.create({
     data: {
-      workspaceId,
+      companyId,
       customerId,
       name,
       address,
@@ -92,7 +200,7 @@ async function seedProject(workspaceId: string, userId: string, customerId: stri
       panelCount: 0,
       document: {
         create: {
-          workspaceId,
+          companyId,
           schemaVersion: "1",
           documentJson: {
             rufsunCadVersion: "0.2",

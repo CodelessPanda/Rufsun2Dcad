@@ -4,11 +4,11 @@ Updated: 2026-09-02
 
 ## 1. Project Overview
 
-RufsunCAD is a browser-based 2D solar CAD and proposal prototype for rooftop solar design. The project began as an interactive designer for drawing roof boundaries and placing solar panels, then expanded into a Phase 1 SaaS-style product with authentication, workspaces, CRM-lite customer management, cloud project storage, Google Maps address workflow, Google Solar API irradiance data, and professional PDF reporting.
+RufsunCAD is a browser-based 2D solar CAD and proposal prototype for rooftop solar design. The project began as an interactive designer for drawing roof boundaries and placing solar panels, expanded into a Phase 1 SaaS-style product with authentication, CRM-lite customer management, cloud project storage, Google Maps address workflow, Google Solar API irradiance data, and professional PDF reporting, added the Phase 2 multi-level SaaS foundation for tenants and companies, added the Phase 3 identity, roles, permissions, invitations, sessions, and seat/licensing foundation, and now includes the Phase 4 commercial foundation for plans, manual subscriptions, entitlements, tenant capacity, company seat allocation, and Solar API quota tracking.
 
 The current product has two major areas:
 
-- Main SaaS workspace area for dashboard, customers, projects, team, and settings.
+- Main SaaS area for platform, tenant, company dashboard, customers, projects, team, and settings.
 - Designer area for CAD drawing, solar panel layout, solar exposure review, energy analysis, and exports.
 
 The application stores all CAD geometry in millimeters. Konva is used for rendering and interaction, but the persistent source of truth is the RufsunCAD document JSON stored in application state, IndexedDB cache, and PostgreSQL JSONB.
@@ -36,7 +36,13 @@ Backend:
 - PostgreSQL
 - JWT access and refresh authentication
 - bcryptjs password hashing
-- Workspace-scoped access control
+- Tenant/company-scoped permission access control
+- Company and tenant invitations
+- Seat/capability enforcement foundation
+- Database-driven plans and entitlements
+- Manual subscription foundation
+- Tenant seat capacity and company allocation enforcement
+- Monthly Solar API usage tracking
 - Google Solar API data-layer proxy
 - Vitest and Supertest for backend tests
 
@@ -57,10 +63,11 @@ Current flow:
 
 1. User logs in or registers.
 2. User selects or creates a workspace.
-3. User can navigate Dashboard, Customers, Projects, Team, and Settings.
-4. User creates or opens a project from the Projects area.
-5. The designer opens for that selected project.
-6. Designer changes autosave locally first, then sync to the cloud document API.
+3. User can switch tenant/company context where permitted.
+4. User can navigate Dashboard, Customers, Projects, Team, and Settings for the active company.
+5. User creates or opens a project from the Projects area.
+6. The designer opens for that selected project.
+7. Designer changes autosave locally first, then sync to the cloud document API.
 
 Seed login:
 
@@ -69,25 +76,56 @@ Email: demo@rufsun.local
 Password: Demo12345
 ```
 
-## 4. SaaS Phase 1 Work Completed
+## 4. SaaS Phase 1, Phase 2, And Phase 3 Work Completed
 
 Authentication:
 
 - Login screen.
 - Registration screen.
+- Invitation-aware registration and acceptance.
+- Email normalization.
+- Email verification token architecture.
+- Password reset flow.
+- Password change flow.
 - Logout flow.
 - Session restore on app boot.
+- Refresh session listing and revocation.
 - JWT access token handling on the frontend.
-- Refresh session model on the backend.
+- Refresh session metadata on the backend.
 
-Workspace system:
+Tenant/company system:
 
-- Workspace onboarding if a user has no workspace.
-- Workspace switching.
-- Workspace settings screen.
-- Workspace summary metrics.
-- Workspace member list.
-- Tenant isolation through backend membership checks.
+- Rufsun Direct default tenant for direct/self-service companies.
+- Platform roles for user, support admin, and super admin.
+- Tenant roles for owner, admin, billing, support, and member.
+- Company roles for owner, admin, design manager, designer, sales manager, sales rep, and project viewer.
+- Seat types for designer, sales, and viewer.
+- Central backend permission registry and permission service.
+- Product capability checks for CAD and Solar API access.
+- Tenant model and tenant memberships.
+- Company model mapped safely onto the existing workspace storage.
+- Company memberships mapped safely onto existing workspace memberships.
+- Company onboarding if a direct user has no company.
+- Tenant switching.
+- Company switching.
+- Company settings screen.
+- Company summary metrics.
+- Functional company team/member management with invitations, role changes, seat changes, suspension, removal, and final-owner protection.
+- Tenant member management and tenant invitations.
+- Super Admin commercial controls for plan, subscription status, and tenant seat capacity.
+- Tenant license management for company seat allocations.
+- Company license summary in Team.
+- Commercial entitlement gates for CAD access/edit, project limits, Solar API irradiance, Auto Fill, and advanced reports.
+- Tenant and company isolation through backend membership checks.
+
+Phase 3 details:
+
+- See `PHASE3_IDENTITY_AUTHZ.md` for the full identity, role, permission, invitation, and licensing foundation report.
+- See `RUN_AFTER_PHASE.md` for exact startup and validation steps after each phase.
+
+Phase 4 details:
+
+- See `PHASE4_COMMERCIAL_FOUNDATION.md` for the commercial foundation report.
 
 CRM-lite:
 
@@ -135,7 +173,9 @@ Important files:
 Cloud database:
 
 - PostgreSQL is the authoritative cloud database.
-- Prisma models now cover users, refresh sessions, workspaces, workspace members, customers, projects, and project documents.
+- Prisma models now cover users, refresh sessions, tenants, tenant memberships, companies, company memberships, customers, projects, and project documents.
+- The existing physical `workspaces` table is preserved and mapped as the Company model during the Phase 2 compatibility migration.
+- The existing physical `workspace_members` table is preserved and mapped as the CompanyMembership model.
 - CAD document JSON is stored in `project_documents.document_json`.
 - Project summaries are derived from the document and stored on the project record, including panel count and system size.
 
@@ -146,11 +186,12 @@ Local browser database:
 - Cloud sync is debounced so dragging and CAD interactions do not block on network requests.
 - Local-only project import support exists for old browser projects that were created before the cloud flow.
 
-Tenant security:
+Tenant/company security:
 
-- Backend APIs are scoped by `workspaceId`.
-- Access checks confirm the authenticated user is a member of the workspace.
-- Cross-workspace customer, project, and document access is blocked.
+- Backend APIs are moving toward explicit `companyId` scoped routes.
+- Access checks confirm the authenticated user has active company membership under an active tenant.
+- Cross-company customer, project, document, and Solar API access is blocked.
+- Suspended tenants and suspended companies block normal operations.
 
 Important files:
 
@@ -159,7 +200,9 @@ Important files:
 - `src/persistence/db.ts`
 - `server/src/documents/documents.service.ts`
 - `server/src/projects/projects.service.ts`
+- `server/src/common/access-control.service.ts`
 - `server/src/common/workspace-access.service.ts`
+- `PHASE2_MIGRATION.md`
 
 ## 6. Google Maps And Address Workflow
 

@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma.service";
-import { WorkspaceAccessService } from "../common/workspace-access.service";
+import { AccessControlService } from "../common/access-control.service";
+import { Permissions } from "../common/permissions";
 import type { CreateCustomerDto } from "./dto/create-customer.dto";
 import type { UpdateCustomerDto } from "./dto/update-customer.dto";
 
@@ -8,15 +9,15 @@ import type { UpdateCustomerDto } from "./dto/update-customer.dto";
 export class CustomersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(WorkspaceAccessService) private readonly access: WorkspaceAccessService
+    @Inject(AccessControlService) private readonly access: AccessControlService
   ) {}
 
-  async list(userId: string, workspaceId: string, search = "") {
-    await this.access.requireMember(userId, workspaceId);
+  async list(userId: string, companyId: string, search = "") {
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.CUSTOMER_VIEW);
     const query = search.trim();
     return this.prisma.customer.findMany({
       where: {
-        workspaceId,
+        companyId,
         archivedAt: null,
         OR: query
           ? [
@@ -32,11 +33,11 @@ export class CustomersService {
     });
   }
 
-  async create(userId: string, workspaceId: string, dto: CreateCustomerDto) {
-    await this.access.requireMember(userId, workspaceId, ["owner", "admin", "designer", "sales"]);
+  async create(userId: string, companyId: string, dto: CreateCustomerDto) {
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.CUSTOMER_CREATE);
     return this.prisma.customer.create({
       data: {
-        workspaceId,
+        companyId,
         createdById: userId,
         customerType: dto.customerType ?? "individual",
         name: dto.name.trim(),
@@ -58,10 +59,10 @@ export class CustomersService {
     });
   }
 
-  async get(userId: string, workspaceId: string, customerId: string) {
-    await this.access.requireCustomer(userId, workspaceId, customerId);
+  async get(userId: string, companyId: string, customerId: string) {
+    await this.access.requireCustomer(userId, companyId, customerId);
     return this.prisma.customer.findFirstOrThrow({
-      where: { id: customerId, workspaceId, archivedAt: null },
+      where: { id: customerId, companyId, archivedAt: null },
       include: {
         projects: {
           where: { archivedAt: null },
@@ -72,8 +73,9 @@ export class CustomersService {
     });
   }
 
-  async update(userId: string, workspaceId: string, customerId: string, dto: UpdateCustomerDto) {
-    await this.access.requireCustomer(userId, workspaceId, customerId);
+  async update(userId: string, companyId: string, customerId: string, dto: UpdateCustomerDto) {
+    await this.access.requireCustomer(userId, companyId, customerId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.CUSTOMER_UPDATE);
     return this.prisma.customer.update({
       where: { id: customerId },
       data: {
@@ -97,8 +99,9 @@ export class CustomersService {
     });
   }
 
-  async archive(userId: string, workspaceId: string, customerId: string) {
-    await this.access.requireCustomer(userId, workspaceId, customerId);
+  async archive(userId: string, companyId: string, customerId: string) {
+    await this.access.requireCustomer(userId, companyId, customerId);
+    await this.access.requireCompanyMembership(userId, companyId, Permissions.CUSTOMER_ARCHIVE);
     return this.prisma.customer.update({ where: { id: customerId }, data: { archivedAt: new Date() } });
   }
 }

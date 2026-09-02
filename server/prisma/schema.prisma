@@ -9,15 +9,49 @@ datasource db {
 
 enum UserStatus {
   active
+  suspended
   disabled
+}
+
+enum PlatformRole {
+  user
+  support_admin
+  super_admin
+}
+
+enum TenantRole {
+  owner
+  admin
+  billing
+  support
+  member
+}
+
+enum TenantType {
+  direct
+  distributor
+  enterprise
+}
+
+enum TenantStatus {
+  active
+  suspended
+  archived
 }
 
 enum WorkspaceStatus {
   active
+  suspended
   archived
 }
 
 enum WorkspaceMemberRole {
+  company_owner
+  company_admin
+  design_manager
+  sales_manager
+  sales_rep
+  project_viewer
   owner
   admin
   designer
@@ -28,7 +62,49 @@ enum WorkspaceMemberRole {
 enum WorkspaceMemberStatus {
   active
   invited
+  suspended
+  removed
   disabled
+}
+
+enum SeatType {
+  designer
+  sales
+  viewer
+  no_seat
+}
+
+enum InvitationScope {
+  tenant
+  company
+}
+
+enum PlanCode {
+  starter
+  professional
+  business
+  enterprise
+  distributor
+  internal
+}
+
+enum SubscriptionStatus {
+  trialing
+  active
+  grace_period
+  suspended
+  canceled
+  expired
+}
+
+enum BillingMode {
+  manual
+  external
+}
+
+enum SubscriptionScope {
+  tenant
+  company
 }
 
 enum CustomerType {
@@ -50,11 +126,17 @@ model User {
   passwordHash    String             @map("password_hash")
   avatarUrl       String?            @map("avatar_url")
   status          UserStatus         @default(active)
+  platformRole    PlatformRole       @default(user) @map("platform_role")
   emailVerifiedAt DateTime?          @map("email_verified_at")
   createdAt       DateTime           @default(now()) @map("created_at")
   updatedAt       DateTime           @updatedAt @map("updated_at")
-  memberships     WorkspaceMember[]
-  createdSpaces   Workspace[]        @relation("WorkspaceCreator")
+  tenantMemberships TenantMembership[]
+  companyMemberships CompanyMembership[]
+  verificationTokens EmailVerificationToken[]
+  passwordResetTokens PasswordResetToken[]
+  invitationsSent Invitation[] @relation("InvitationInviter")
+  invitationsAccepted Invitation[] @relation("InvitationAcceptedBy")
+  createdCompanies Company[]         @relation("CompanyCreator")
   customers       Customer[]         @relation("CustomerCreator")
   projectsCreated Project[]          @relation("ProjectCreator")
   projectsUpdated Project[]          @relation("ProjectUpdater")
@@ -63,10 +145,50 @@ model User {
   @@map("users")
 }
 
-model Workspace {
+model Tenant {
   id          String             @id @default(uuid()) @db.Uuid
   name        String
   slug        String             @unique
+  type        TenantType         @default(direct)
+  status      TenantStatus       @default(active)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+  archivedAt  DateTime?          @map("archived_at")
+  companies   Company[]
+  memberships TenantMembership[]
+  invitations Invitation[]
+  subscriptions Subscription[]
+  seatCapacities TenantSeatCapacity[]
+  usageMeters UsageMeter[]
+
+  @@map("tenants")
+}
+
+model TenantMembership {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  userId    String   @map("user_id") @db.Uuid
+  user      User     @relation(fields: [userId], references: [id])
+  role      TenantRole @default(member)
+  status    WorkspaceMemberStatus @default(active)
+  invitedById String? @map("invited_by") @db.Uuid
+  joinedAt  DateTime? @map("joined_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+  @@map("tenant_memberships")
+}
+
+model Company {
+  id          String             @id @default(uuid()) @db.Uuid
+  tenantId    String             @map("tenant_id") @db.Uuid
+  tenant      Tenant             @relation(fields: [tenantId], references: [id])
+  name        String
+  slug        String
   logoUrl     String?            @map("logo_url")
   email       String?
   phone       String?
@@ -78,39 +200,48 @@ model Workspace {
   postalCode  String?            @map("postal_code")
   status      WorkspaceStatus    @default(active)
   createdById String             @map("created_by") @db.Uuid
-  createdBy   User               @relation("WorkspaceCreator", fields: [createdById], references: [id])
+  createdBy   User               @relation("CompanyCreator", fields: [createdById], references: [id])
   createdAt   DateTime           @default(now()) @map("created_at")
   updatedAt   DateTime           @updatedAt @map("updated_at")
-  members     WorkspaceMember[]
+  archivedAt  DateTime?          @map("archived_at")
+  members     CompanyMembership[]
   customers   Customer[]
   projects    Project[]
   documents   ProjectDocument[]
+  invitations Invitation[]
+  subscriptions Subscription[]
+  seatAllocations CompanySeatAllocation[]
+  usageMeters UsageMeter[]
 
+  @@unique([tenantId, slug])
+  @@index([tenantId])
   @@map("workspaces")
 }
 
-model WorkspaceMember {
+model CompanyMembership {
   id          String                @id @default(uuid()) @db.Uuid
-  workspaceId String                @map("workspace_id") @db.Uuid
-  workspace   Workspace             @relation(fields: [workspaceId], references: [id])
+  companyId   String                @map("workspace_id") @db.Uuid
+  company     Company               @relation(fields: [companyId], references: [id])
   userId      String                @map("user_id") @db.Uuid
   user        User                  @relation(fields: [userId], references: [id])
   role        WorkspaceMemberRole
+  seatType    SeatType              @default(designer) @map("seat_type")
   status      WorkspaceMemberStatus @default(active)
   invitedById String?               @map("invited_by") @db.Uuid
   joinedAt    DateTime?             @map("joined_at")
   createdAt   DateTime              @default(now()) @map("created_at")
   updatedAt   DateTime              @updatedAt @map("updated_at")
 
-  @@unique([workspaceId, userId])
+  @@unique([companyId, userId])
+  @@index([companyId])
   @@index([userId])
   @@map("workspace_members")
 }
 
 model Customer {
   id              String       @id @default(uuid()) @db.Uuid
-  workspaceId     String       @map("workspace_id") @db.Uuid
-  workspace       Workspace    @relation(fields: [workspaceId], references: [id])
+  companyId       String       @map("workspace_id") @db.Uuid
+  company         Company      @relation(fields: [companyId], references: [id])
   customerType    CustomerType @default(individual) @map("customer_type")
   name            String
   companyName     String?      @map("company_name")
@@ -134,14 +265,14 @@ model Customer {
   archivedAt      DateTime?    @map("archived_at")
   projects        Project[]
 
-  @@index([workspaceId])
+  @@index([companyId])
   @@map("customers")
 }
 
 model Project {
   id           String           @id @default(uuid()) @db.Uuid
-  workspaceId  String           @map("workspace_id") @db.Uuid
-  workspace    Workspace        @relation(fields: [workspaceId], references: [id])
+  companyId    String           @map("workspace_id") @db.Uuid
+  company      Company          @relation(fields: [companyId], references: [id])
   customerId   String           @map("customer_id") @db.Uuid
   customer     Customer         @relation(fields: [customerId], references: [id])
   name         String
@@ -167,15 +298,15 @@ model Project {
   archivedAt   DateTime?        @map("archived_at")
   document     ProjectDocument?
 
-  @@index([workspaceId])
+  @@index([companyId])
   @@index([customerId])
   @@map("projects")
 }
 
 model ProjectDocument {
   id            String    @id @default(uuid()) @db.Uuid
-  workspaceId   String    @map("workspace_id") @db.Uuid
-  workspace     Workspace @relation(fields: [workspaceId], references: [id])
+  companyId     String    @map("workspace_id") @db.Uuid
+  company       Company   @relation(fields: [companyId], references: [id])
   projectId     String    @unique @map("project_id") @db.Uuid
   project       Project   @relation(fields: [projectId], references: [id])
   documentJson  Json      @map("document_json")
@@ -183,7 +314,7 @@ model ProjectDocument {
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
-  @@index([workspaceId])
+  @@index([companyId])
   @@map("project_documents")
 }
 
@@ -194,8 +325,176 @@ model RefreshSession {
   tokenHash String   @map("token_hash")
   expiresAt DateTime @map("expires_at")
   revokedAt DateTime? @map("revoked_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  userAgent String? @map("user_agent")
+  ipAddress String? @map("ip_address")
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([userId])
   @@map("refresh_sessions")
+}
+
+model Invitation {
+  id               String               @id @default(uuid()) @db.Uuid
+  email            String
+  scope            InvitationScope
+  tenantId         String?              @map("tenant_id") @db.Uuid
+  tenant           Tenant?              @relation(fields: [tenantId], references: [id])
+  companyId        String?              @map("company_id") @db.Uuid
+  company          Company?             @relation(fields: [companyId], references: [id])
+  tenantRole       TenantRole?          @map("tenant_role")
+  companyRole      WorkspaceMemberRole? @map("company_role")
+  seatType         SeatType?            @map("seat_type")
+  tokenHash        String               @unique @map("token_hash")
+  invitedByUserId  String               @map("invited_by_user_id") @db.Uuid
+  invitedBy        User                 @relation("InvitationInviter", fields: [invitedByUserId], references: [id])
+  acceptedByUserId String?              @map("accepted_by_user_id") @db.Uuid
+  acceptedBy       User?                @relation("InvitationAcceptedBy", fields: [acceptedByUserId], references: [id])
+  expiresAt        DateTime             @map("expires_at")
+  acceptedAt       DateTime?            @map("accepted_at")
+  revokedAt        DateTime?            @map("revoked_at")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  @@index([email])
+  @@index([tenantId])
+  @@index([companyId])
+  @@index([expiresAt])
+  @@map("invitations")
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("email_verification_tokens")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
+}
+
+model Plan {
+  id          String            @id @default(uuid()) @db.Uuid
+  code        PlanCode          @unique
+  name        String
+  description String?
+  isSystem    Boolean           @default(true) @map("is_system")
+  isActive    Boolean           @default(true) @map("is_active")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+  entitlements PlanEntitlement[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model PlanEntitlement {
+  id        String   @id @default(uuid()) @db.Uuid
+  planId    String   @map("plan_id") @db.Uuid
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  key       String
+  enabled   Boolean  @default(true)
+  limit     Int?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([planId, key])
+  @@index([key])
+  @@map("plan_entitlements")
+}
+
+model Subscription {
+  id          String             @id @default(uuid()) @db.Uuid
+  scope       SubscriptionScope   @default(tenant)
+  tenantId    String?            @map("tenant_id") @db.Uuid
+  tenant      Tenant?            @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  companyId   String?            @map("company_id") @db.Uuid
+  company     Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  planId      String             @map("plan_id") @db.Uuid
+  plan        Plan               @relation(fields: [planId], references: [id])
+  status      SubscriptionStatus @default(trialing)
+  billingMode BillingMode        @default(manual) @map("billing_mode")
+  trialStartsAt DateTime?        @map("trial_starts_at")
+  trialEndsAt DateTime?          @map("trial_ends_at")
+  startsAt    DateTime?          @map("starts_at")
+  endsAt      DateTime?          @map("ends_at")
+  graceEndsAt DateTime?          @map("grace_ends_at")
+  canceledAt  DateTime?          @map("canceled_at")
+  notes       String?
+  createdById String?            @map("created_by") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@unique([tenantId, scope])
+  @@unique([companyId])
+  @@index([planId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+model TenantSeatCapacity {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  seatType  SeatType @map("seat_type")
+  total     Int?
+  unlimited Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, seatType])
+  @@index([seatType])
+  @@map("tenant_seat_capacities")
+}
+
+model CompanySeatAllocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  seatType  SeatType @map("seat_type")
+  allocated Int?
+  unlimited Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([companyId, seatType])
+  @@index([seatType])
+  @@map("company_seat_allocations")
+}
+
+model UsageMeter {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  companyId   String?  @map("company_id") @db.Uuid
+  company     Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  key         String
+  periodStart DateTime @map("period_start")
+  count       Int      @default(0)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, companyId, key, periodStart])
+  @@index([key])
+  @@index([periodStart])
+  @@map("usage_meters")
 }
