@@ -10,6 +10,8 @@ import type {
   SnapGuide,
   SnapMarker,
   SolarPanelObject,
+  SubarrayConfig,
+  SubarrayRackingType,
   Viewport
 } from "../types/cad";
 import { createBlankDocument, createDemoDocument } from "../cad/document/defaultDocument";
@@ -41,14 +43,15 @@ interface CadState {
   setViewport: (viewport: Viewport) => void;
   setPointerWorld: (point: Point) => void;
   setDraft: (draft: DraftState) => void;
-  setSnapMarker: (marker?: SnapMarker) => void;
   setGuides: (guides: SnapGuide[]) => void;
+  setSnapMarker: (marker?: SnapMarker) => void;
   setSelectedModuleId: (id: string) => void;
   selectOnly: (id?: string) => void;
   toggleSelect: (id: string) => void;
   selectMany: (ids: string[]) => void;
+  setSelectedIds: (ids: string[]) => void;
   clearSelection: () => void;
-  addObjects: (objects: CadObject[], selectIds?: string[]) => void;
+  addObjects: (objects: CadObject[], selectIds?: string[], subarray?: SubarrayConfig) => void;
   updateObject: (id: string, patch: Partial<CadObject>, recordHistory?: boolean) => void;
   replaceObject: (object: CadObject, recordHistory?: boolean) => void;
   translateObjects: (ids: string[], dx: number, dy: number, recordHistory?: boolean) => void;
@@ -67,6 +70,11 @@ interface CadState {
   bringForward: (ids: string[]) => void;
   sendBackward: (ids: string[]) => void;
   lockObjects: (ids: string[], locked: boolean) => void;
+  createSubarray: (name: string, rackingType?: SubarrayRackingType, rackTiltDeg?: number, roofId?: string) => SubarrayConfig;
+  addSubarrayConfig: (subarray: SubarrayConfig) => void;
+  deleteSubarray: (subarrayId: string, deletePanels?: boolean) => void;
+  assignPanelsToSubarray: (panelIds: string[], subarrayId: string) => void;
+  selectSubarray: (subarrayId: string) => void;
   toast: string;
   showToast: (message: string) => void;
 }
@@ -143,19 +151,26 @@ export const useCadStore = create<CadState>((set, get) => ({
         : [...state.selectedIds, id],
       contextMenu: null
     })),
-  selectMany: (selectedIds) => set({ selectedIds, contextMenu: null }),
+  selectMany: (selectedIds: string[]) => set({ selectedIds, contextMenu: null }),
+  setSelectedIds: (selectedIds: string[]) => set({ selectedIds, contextMenu: null }),
   clearSelection: () => set({ selectedIds: [], contextMenu: null }),
-  addObjects: (objects, selectIds) =>
-    set((state) =>
-      withHistory(
+  addObjects: (objects, selectIds, subarray) =>
+    set((state) => {
+      const currentSubarrays = state.document.subarrays || [];
+      const updatedSubarrays =
+        subarray && !currentSubarrays.some((s) => s.id === subarray.id)
+          ? [...currentSubarrays, subarray]
+          : currentSubarrays;
+      return withHistory(
         state,
         ensureSiteModel({
           ...state.document,
+          subarrays: updatedSubarrays,
           objects: markPanelRoofWarnings([...state.document.objects, ...objects]).sort((a, b) => a.zIndex - b.zIndex)
         }),
         selectIds ?? state.selectedIds
-      )
-    ),
+      );
+    }),
   updateObject: (id, patch, recordHistory = true) =>
     set((state) => {
       const nextObjects = state.document.objects.map((object) => {
@@ -323,6 +338,62 @@ export const useCadStore = create<CadState>((set, get) => ({
         objects: state.document.objects.map((object) => (ids.includes(object.id) ? { ...object, locked } : object))
       })
     ),
+  createSubarray: (name, rackingType = "flush", rackTiltDeg, roofId) => {
+    const newSubarray: SubarrayConfig = {
+      id: `subarray-${Date.now()}`,
+      name: name.trim() || "Subarray",
+      rackingType,
+      rackTiltDeg,
+      roofId
+    };
+    set((state) => {
+      const current = state.document.subarrays || [];
+      const nextDocument = {
+        ...state.document,
+        subarrays: [...current, newSubarray]
+      };
+      return withHistory(state, nextDocument);
+    });
+    return newSubarray;
+  },
+  addSubarrayConfig: (subarray) =>
+    set((state) => {
+      const current = state.document.subarrays || [];
+      if (current.some((s) => s.id === subarray.id)) return {};
+      const nextDocument = {
+        ...state.document,
+        subarrays: [...current, subarray]
+      };
+      return withHistory(state, nextDocument);
+    }),
+  deleteSubarray: (subarrayId, deletePanels = false) =>
+    set((state) => {
+      const nextSubarrays = (state.document.subarrays || []).filter((s) => s.id !== subarrayId);
+      let nextObjects = state.document.objects;
+      if (deletePanels) {
+        nextObjects = nextObjects.filter((o) => !(o.type === "solarPanel" && o.subarrayId === subarrayId));
+      } else {
+        nextObjects = nextObjects.map((o) =>
+          o.type === "solarPanel" && o.subarrayId === subarrayId ? { ...o, subarrayId: undefined } : o
+        );
+      }
+      const nextDocument = { ...state.document, subarrays: nextSubarrays, objects: markPanelRoofWarnings(nextObjects) };
+      return withHistory(state, nextDocument, state.selectedIds.filter((id) => nextObjects.some((o) => o.id === id)));
+    }),
+  assignPanelsToSubarray: (panelIds, subarrayId) =>
+    set((state) => {
+      const nextObjects = state.document.objects.map((o) =>
+        o.type === "solarPanel" && panelIds.includes(o.id) ? { ...o, subarrayId } : o
+      );
+      const nextDocument = { ...state.document, objects: nextObjects };
+      return withHistory(state, nextDocument);
+    }),
+  selectSubarray: (subarrayId) => {
+    const panels = get().document.objects.filter(
+      (o) => o.type === "solarPanel" && o.subarrayId === subarrayId
+    );
+    set({ selectedIds: panels.map((p) => p.id) });
+  },
   showToast: (message) => {
     set({ toast: message });
     setTimeout(() => set({ toast: "" }), 3000);

@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from "react";
-import { Eye, EyeOff, Lock, Unlock } from "lucide-react";
+import { Eye, EyeOff, Lock, Unlock, Plus, Layers, Sliders, Trash2, CheckCircle2, Sparkles, Grid } from "lucide-react";
 import { useCadStore, selectedSolarStats } from "../../store/useCadStore";
-import type { CadObject, RoofEdgeClassification, RoofObject, SolarPanelObject } from "../../types/cad";
-import { sampleSolarModules } from "../../data/sampleSolarModules";
+import type { CadObject, RoofEdgeClassification, RoofObject, SolarPanelObject, SubarrayConfig, SubarrayRackingType } from "../../types/cad";
+import { BUILTIN_SOLAR_MODULES, getAllSolarModules, saveCustomModule, findModuleById, type SolarModuleItem, type CellTechnology } from "../../cad/catalog/moduleCatalog";
+import { generatePvLayout, calculateRowPitch, calculateSubarrayStats, type AutoDesignerMode, type LayoutPrioritization } from "../../cad/layout/pvLayoutEngine";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle, getBoundingBox, polygonContainsPolygon, roofUsablePolygon, rotatePoint, validatePanelPlacement } from "../../cad/geometry/geometry";
-import { createSolarPanel, nextZ } from "../../cad/objects/factory";
+import { formatMetric, polygonArea, distance, angle, validatePanelPlacement, roofUsablePolygon } from "../../cad/geometry/geometry";
+import { nextZ } from "../../cad/objects/factory";
 import type { CompanyCommercialSummary } from "../../api/types";
 import { DEFAULT_STRUCTURE_ID, calculateSiteSummary, ensureSiteModel, normalizeRoofEdges } from "../../cad/site/siteModel";
+import type { ProjectSolarDataState } from "../../cad/solar/solarExposureTypes";
 
-export function PropertiesPanel({ commercialAccess }: { commercialAccess?: CompanyCommercialSummary | null }) {
+export function PropertiesPanel({
+  commercialAccess,
+  solarExposure
+}: {
+  commercialAccess?: CompanyCommercialSummary | null;
+  solarExposure?: ProjectSolarDataState;
+}) {
   const document = useCadStore((state) => state.document);
   const selectedIds = useCadStore((state) => state.selectedIds);
   const activeTool = useCadStore((state) => state.activeTool);
@@ -33,7 +41,14 @@ export function PropertiesPanel({ commercialAccess }: { commercialAccess?: Compa
         <MultiSelection objects={selectedObjects} />
       )}
 
-      {activeTool === "solar" && <SolarLayoutTools canAutoFill={hasEntitlement(commercialAccess, "layout.auto_fill")} />}
+      {activeTool === "solar" && (
+        <SolarLayoutTools
+          canAutoFill={hasEntitlement(commercialAccess, "layout.auto_fill")}
+          solarExposure={solarExposure}
+        />
+      )}
+
+      <SubarraysSection />
 
       <section className="panel-section">
         <h2>Layers</h2>
@@ -141,7 +156,13 @@ function addStructure(document: ReturnType<typeof ensureSiteModel>, setDocument:
   });
 }
 
-function SolarLayoutTools({ canAutoFill }: { canAutoFill: boolean }) {
+function SolarLayoutTools({
+  canAutoFill,
+  solarExposure
+}: {
+  canAutoFill: boolean;
+  solarExposure?: ProjectSolarDataState;
+}) {
   const document = useCadStore((state) => state.document);
   const selectedModuleId = useCadStore((state) => state.selectedModuleId);
   const setSelectedModuleId = useCadStore((state) => state.setSelectedModuleId);
@@ -150,12 +171,36 @@ function SolarLayoutTools({ canAutoFill }: { canAutoFill: boolean }) {
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const obstructions = document.objects.filter((object) => object.type === "obstruction");
   const restrictedZones = document.objects.filter((object) => object.type === "restrictedZone");
+
+  const [tab, setTab] = useState<"autodesigner" | "manual">("autodesigner");
+  const [designerMode, setDesignerMode] = useState<AutoDesignerMode>("max_fill");
+  const [targetKwp, setTargetKwp] = useState(10);
+  const [targetCount, setTargetCount] = useState(18);
+  const [prioritization, setPrioritization] = useState<LayoutPrioritization>("standard_grid");
+  const [orientation, setOrientation] = useState<SolarPanelObject["orientation"]>("portrait");
+  const [gap, setGap] = useState(20);
+
+  // Walkway corridor
+  const [hasWalkway, setHasWalkway] = useState(false);
+  const [walkwayWidthMm, setWalkwayWidthMm] = useState(900);
+  const [walkwayOrientation, setWalkwayOrientation] = useState<"vertical" | "horizontal">("vertical");
+
+  // Racking & pitch
+  const [rackingType, setRackingType] = useState<SubarrayRackingType>("flush");
+  const [rackTiltDeg, setRackTiltDeg] = useState(15);
+
+  // Subarray name & custom module modal
+  const [subarrayName, setSubarrayName] = useState("");
+  const [customModalOpen, setCustomModalOpen] = useState(false);
+  const [allModules, setAllModules] = useState<SolarModuleItem[]>(getAllSolarModules());
+
+  // Manual grid inputs
   const [rows, setRows] = useState(3);
   const [columns, setColumns] = useState(6);
-  const [gap, setGap] = useState(20);
-  const [orientation, setOrientation] = useState<SolarPanelObject["orientation"]>("portrait");
+
   const [selectedRoofId, setSelectedRoofId] = useState<string>("");
-  const module = sampleSolarModules.find((item) => item.id === selectedModuleId) ?? sampleSolarModules[0];
+
+  const module = allModules.find((item) => item.id === selectedModuleId) ?? allModules[0] ?? BUILTIN_SOLAR_MODULES[0];
 
   const largestRoof = roofs
     .slice()
@@ -175,65 +220,117 @@ function SolarLayoutTools({ canAutoFill }: { canAutoFill: boolean }) {
     prevRoofCount.current = roofs.length;
   }, [roofs, selectedRoofId]);
 
-  const addGrid = () => {
-    if (!activeRoof) return;
-    const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
-    const { panels, skipped } = createPanelsForRoofGrid({
-      roof: activeRoof,
-      module,
-      rows,
-      columns,
-      gap,
-      orientation,
-      zIndexStart: nextZ(document.objects),
-      layerId: preferredSolarLayer(document),
-      existingPanels,
-      obstructions,
-      restrictedZones
-    });
-    if (panels.length) {
-      addObjects(panels, panels.map((panel) => panel.id));
-      setSelectedRoofId(activeRoof.id);
-      if (skipped > 0) showToast(`${panels.length} panels placed — ${skipped} positions skipped (occupied)`);
-    } else {
-      showToast("No space available — all positions overlap existing panels");
-    }
-  };
+  // Calculated row pitch preview for tilted racks
+  const modHeight = orientation === "portrait" ? module.heightMM : module.widthMM;
+  const calculatedPitch = calculateRowPitch(modHeight, rackTiltDeg);
 
-  const autoFill = () => {
-    if (!canAutoFill) {
+  const handleGenerateAutoLayout = () => {
+    if (!activeRoof) return;
+    if (designerMode === "max_fill" && !canAutoFill) {
       showToast("Your company does not have access to Auto Fill.");
       return;
     }
+
+    const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+    const layerId = preferredSolarLayer(document);
+    const zIndexStart = nextZ(document.objects);
+
+    const effectiveSubarrayName =
+      subarrayName.trim() || `${activeRoof.name || "Roof"} ${rackingType === "tilted_rack" ? "Tilted " : ""}Array`;
+
+    const result = generatePvLayout({
+      roof: activeRoof,
+      module,
+      mode: designerMode,
+      targetKwp: designerMode === "target_capacity" ? targetKwp : undefined,
+      targetCount: designerMode === "target_count" ? targetCount : undefined,
+      orientation,
+      moduleGap: gap,
+      walkwayWidthMm: hasWalkway ? walkwayWidthMm : 0,
+      walkwayOrientation,
+      prioritization,
+      solarExposure,
+      subarrayName: effectiveSubarrayName,
+      rackingType,
+      rackTiltDeg: rackingType === "tilted_rack" || rackingType === "ballasted" ? rackTiltDeg : undefined,
+      layerId,
+      zIndexStart,
+      existingPanels,
+      obstructions,
+      restrictedZones,
+      clearanceMm: 25.4
+    });
+
+    if (result.panels.length > 0) {
+      addObjects(result.panels, result.panels.map((p) => p.id), result.subarray);
+      setSelectedRoofId(activeRoof.id);
+
+      const targetMsg =
+        designerMode === "target_capacity"
+          ? ` · Target: ${targetKwp} kWp`
+          : designerMode === "target_count"
+          ? ` · Target: ${targetCount} panels`
+          : "";
+      showToast(
+        `AutoDesigner placed ${result.panels.length} panels (${result.totalCapacityKwp} kWp)${targetMsg}${
+          result.skippedCount > 0 ? ` · ${result.skippedCount} positions skipped` : ""
+        }`
+      );
+    } else {
+      showToast("No suitable positions found inside usable roof area.");
+    }
+  };
+
+  const handleManualGrid = () => {
     if (!activeRoof) return;
     const existingPanels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
     const layerId = preferredSolarLayer(document);
-    const zIndex = nextZ(document.objects);
-    const { panels, skipped } = createPanelsForRoofGrid({
+    const zIndexStart = nextZ(document.objects);
+
+    const effectiveSubarrayName = subarrayName.trim() || `${activeRoof.name || "Roof"} Grid Array`;
+
+    const result = generatePvLayout({
       roof: activeRoof,
       module,
-      rows: 99,
-      columns: 99,
-      gap,
+      mode: "target_count",
+      targetCount: rows * columns,
       orientation,
-      zIndexStart: zIndex,
+      moduleGap: gap,
+      rowPitchMm: rackingType === "tilted_rack" ? calculatedPitch : undefined,
+      subarrayName: effectiveSubarrayName,
+      rackingType,
+      rackTiltDeg: rackingType === "tilted_rack" ? rackTiltDeg : undefined,
       layerId,
+      zIndexStart,
       existingPanels,
       obstructions,
-      restrictedZones
+      restrictedZones,
+      clearanceMm: 25.4
     });
-    if (panels.length) {
-      addObjects(panels, panels.map((panel) => panel.id));
+
+    if (result.panels.length > 0) {
+      addObjects(result.panels, result.panels.map((p) => p.id), result.subarray);
       setSelectedRoofId(activeRoof.id);
-      if (skipped > 0) showToast(`${panels.length} panels placed — ${skipped} positions skipped (occupied)`);
+      showToast(`Grid placed ${result.panels.length} panels (${result.totalCapacityKwp} kWp)`);
     } else {
-      showToast("No space available — all positions overlap existing panels");
+      showToast("No space available — grid positions overlap boundaries or obstructions");
     }
   };
 
   return (
     <section className="panel-section solar-layout-tools">
-      <h2>Solar Layout</h2>
+      <div className="panel-heading-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h2>PV Layout Engine</h2>
+        <button
+          className="ghost-button"
+          style={{ fontSize: "11px", padding: "2px 8px" }}
+          onClick={() => setCustomModalOpen(true)}
+          title="Add custom solar module specifications"
+        >
+          + Custom Module
+        </button>
+      </div>
+
       {roofs.length > 0 && (
         <label className="field">
           <span>Target Roof</span>
@@ -246,39 +343,464 @@ function SolarLayoutTools({ canAutoFill }: { canAutoFill: boolean }) {
           </select>
         </label>
       )}
-      <select value={selectedModuleId} onChange={(event) => setSelectedModuleId(event.target.value)}>
-        {sampleSolarModules.map((module) => (
-          <option key={module.id} value={module.id}>
-            {module.manufacturer} {module.model} · {module.wattage} W
-          </option>
+
+      <label className="field">
+        <span>Solar Module</span>
+        <select
+          value={selectedModuleId}
+          onChange={(event) => setSelectedModuleId(event.target.value)}
+        >
+          {allModules.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.manufacturer} {item.model} · {item.wattage}W ({item.widthMM}×{item.heightMM})
+              {item.isCustom ? " ★" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {/* Mode Switcher Tabs */}
+      <div className="control-tabs" style={{ display: "flex", margin: "8px 0", gap: "4px" }}>
+        <button
+          type="button"
+          className={tab === "autodesigner" ? "active" : ""}
+          onClick={() => setTab("autodesigner")}
+          style={{ flex: 1, padding: "6px", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
+        >
+          <Sparkles size={13} /> AutoDesigner
+        </button>
+        <button
+          type="button"
+          className={tab === "manual" ? "active" : ""}
+          onClick={() => setTab("manual")}
+          style={{ flex: 1, padding: "6px", fontSize: "11px", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
+        >
+          <Grid size={13} /> Manual Grid
+        </button>
+      </div>
+
+      {tab === "autodesigner" ? (
+        <>
+          <label className="field">
+            <span>Sizing Goal</span>
+            <select
+              value={designerMode}
+              onChange={(e) => setDesignerMode(e.target.value as AutoDesignerMode)}
+            >
+              <option value="max_fill">Max Fill (Maximum Density)</option>
+              <option value="target_capacity">Target Capacity (kWp)</option>
+              <option value="target_count">Target Module Count</option>
+            </select>
+          </label>
+
+          {designerMode === "target_capacity" && (
+            <div>
+              <NumberField
+                label="Target Capacity"
+                value={targetKwp}
+                suffix="kWp"
+                onCommit={(val) => setTargetKwp(Math.max(0.5, val))}
+              />
+              <p className="fine-print" style={{ marginTop: "-4px", marginBottom: "8px" }}>
+                Requires ~{Math.ceil((targetKwp * 1000) / module.wattage)} modules ({module.wattage}W each)
+              </p>
+            </div>
+          )}
+
+          {designerMode === "target_count" && (
+            <div>
+              <NumberField
+                label="Module Count"
+                value={targetCount}
+                suffix="panels"
+                onCommit={(val) => setTargetCount(Math.max(1, Math.round(val)))}
+              />
+              <p className="fine-print" style={{ marginTop: "-4px", marginBottom: "8px" }}>
+                Total system size: {((targetCount * module.wattage) / 1000).toFixed(2)} kWp
+              </p>
+            </div>
+          )}
+
+          {solarExposure?.status === "ready" && (
+            <label className="field">
+              <span>Placement Priority</span>
+              <select
+                value={prioritization}
+                onChange={(e) => setPrioritization(e.target.value as LayoutPrioritization)}
+              >
+                <option value="best_irradiance">Best Solar Exposure (Highest Flux First)</option>
+                <option value="standard_grid">Standard Grid (Top to Bottom)</option>
+              </select>
+            </label>
+          )}
+
+          <div className="layout-controls" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+            <label className="field">
+              <span>Orientation</span>
+              <select
+                value={orientation}
+                onChange={(e) => setOrientation(e.target.value as SolarPanelObject["orientation"])}
+              >
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </label>
+            <NumberField
+              label="Module Gap"
+              value={gap}
+              suffix="mm"
+              onCommit={(val) => setGap(Math.max(0, val))}
+            />
+          </div>
+
+          {/* Racking Type Selection */}
+          <label className="field">
+            <span>Racking System</span>
+            <select
+              value={rackingType}
+              onChange={(e) => setRackingType(e.target.value as SubarrayRackingType)}
+            >
+              <option value="flush">Flush Mount (Roof Sloped)</option>
+              <option value="tilted_rack">Tilted Rack (Flat Roof)</option>
+              <option value="ballasted">Ballasted (Flat Commercial)</option>
+              <option value="ground_mount">Ground Mount</option>
+            </select>
+          </label>
+
+          {(rackingType === "tilted_rack" || rackingType === "ballasted") && (
+            <div style={{ background: "rgba(22, 133, 95, 0.06)", padding: "8px", borderRadius: "6px", marginBottom: "8px" }}>
+              <NumberField
+                label="Rack Tilt"
+                value={rackTiltDeg}
+                suffix="deg"
+                onCommit={(val) => setRackTiltDeg(Math.max(5, Math.min(60, val)))}
+              />
+              <p className="fine-print" style={{ margin: "4px 0 0" }}>
+                Auto Row Pitch: <strong>{calculatedPitch} mm</strong> (avoids shading at 22° winter sun)
+              </p>
+            </div>
+          )}
+
+          {/* Service Walkway Corridor */}
+          <div style={{ margin: "6px 0 10px" }}>
+            <label className="toggle-row" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <input
+                type="checkbox"
+                checked={hasWalkway}
+                onChange={(e) => setHasWalkway(e.target.checked)}
+              />
+              <span>Service / Fire Access Walkway</span>
+            </label>
+            {hasWalkway && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", marginTop: "6px" }}>
+                <NumberField
+                  label="Walkway Width"
+                  value={walkwayWidthMm}
+                  suffix="mm"
+                  onCommit={(val) => setWalkwayWidthMm(Math.max(300, val))}
+                />
+                <label className="field">
+                  <span>Aisle Direction</span>
+                  <select
+                    value={walkwayOrientation}
+                    onChange={(e) => setWalkwayOrientation(e.target.value as "vertical" | "horizontal")}
+                  >
+                    <option value="vertical">Vertical Corridor</option>
+                    <option value="horizontal">Horizontal Corridor</option>
+                  </select>
+                </label>
+              </div>
+            )}
+          </div>
+
+          <label className="field">
+            <span>Subarray Name</span>
+            <input
+              value={subarrayName}
+              placeholder={`${activeRoof?.name || "Roof"} Array`}
+              onChange={(e) => setSubarrayName(e.target.value)}
+            />
+          </label>
+
+          <button
+            className="primary-action"
+            onClick={handleGenerateAutoLayout}
+            disabled={!activeRoof}
+            style={{ marginTop: "8px", width: "100%" }}
+          >
+            <Sparkles size={14} /> Auto Design Layout
+          </button>
+        </>
+      ) : (
+        <>
+          <div className="layout-controls" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+            <NumberField
+              label="Rows"
+              value={rows}
+              onCommit={(value) => setRows(Math.max(1, Math.round(value)))}
+            />
+            <NumberField
+              label="Columns"
+              value={columns}
+              onCommit={(value) => setColumns(Math.max(1, Math.round(value)))}
+            />
+          </div>
+          <div className="layout-controls" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+            <NumberField
+              label="Gap"
+              value={gap}
+              suffix="mm"
+              onCommit={(value) => setGap(Math.max(0, value))}
+            />
+            <label className="field">
+              <span>Orientation</span>
+              <select
+                value={orientation}
+                onChange={(e) => setOrientation(e.target.value as SolarPanelObject["orientation"])}
+              >
+                <option value="portrait">Portrait</option>
+                <option value="landscape">Landscape</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="field">
+            <span>Subarray Name</span>
+            <input
+              value={subarrayName}
+              placeholder={`${activeRoof?.name || "Roof"} Grid Array`}
+              onChange={(e) => setSubarrayName(e.target.value)}
+            />
+          </label>
+
+          <button
+            className="primary-action"
+            onClick={handleManualGrid}
+            disabled={!activeRoof}
+            style={{ marginTop: "8px", width: "100%" }}
+          >
+            Create Grid Array ({rows * columns} panels)
+          </button>
+        </>
+      )}
+
+      {customModalOpen && (
+        <CustomModuleDialog
+          onCancel={() => setCustomModalOpen(false)}
+          onSave={(newModule) => {
+            saveCustomModule(newModule);
+            const updated = getAllSolarModules();
+            setAllModules(updated);
+            setSelectedModuleId(newModule.id);
+            setCustomModalOpen(false);
+            showToast(`Custom module "${newModule.manufacturer} ${newModule.model}" added!`);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+function SubarraysSection() {
+  const document = useCadStore((state) => state.document);
+  const selectSubarray = useCadStore((state) => state.selectSubarray);
+  const deleteSubarray = useCadStore((state) => state.deleteSubarray);
+  const panels = document.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+  const stats = calculateSubarrayStats(panels, document.subarrays);
+
+  if (panels.length === 0 && (!document.subarrays || document.subarrays.length === 0)) {
+    return null;
+  }
+
+  return (
+    <section className="panel-section">
+      <div className="panel-heading-row">
+        <h2>Subarrays</h2>
+        <Layers size={14} />
+      </div>
+      <div className="subarray-list" style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+        {stats.map((sub) => (
+          <div
+            key={sub.subarrayId}
+            style={{
+              padding: "8px",
+              borderRadius: "6px",
+              background: "rgba(0, 0, 0, 0.03)",
+              border: "1px solid rgba(0, 0, 0, 0.08)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px"
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <strong style={{ fontSize: "12px" }}>{sub.name}</strong>
+              <span style={{ fontSize: "11px", fontWeight: 600, color: "#16855f" }}>
+                {sub.totalKwp} kWp
+              </span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
+              <span>{sub.moduleCount} modules</span>
+              <span>{sub.rackingType ? sub.rackingType.replace("_", " ") : "flush"}</span>
+            </div>
+            <div style={{ display: "flex", gap: "4px", marginTop: "4px" }}>
+              <button
+                type="button"
+                className="secondary-action"
+                style={{ flex: 1, padding: "3px 6px", fontSize: "10px" }}
+                onClick={() => selectSubarray(sub.subarrayId)}
+              >
+                Select Array
+              </button>
+              <button
+                type="button"
+                className="ghost-button"
+                style={{ padding: "3px 6px", fontSize: "10px", color: "#b42318" }}
+                title="Delete this subarray"
+                onClick={() => {
+                  if (window.confirm(`Delete ${sub.name}? Click OK to delete panels too, or Cancel to keep panels.`)) {
+                    deleteSubarray(sub.subarrayId, true);
+                  }
+                }}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          </div>
         ))}
-      </select>
-      <div className="layout-controls">
-        <NumberField label="Rows" value={rows} onCommit={(value) => setRows(Math.max(1, Math.round(value)))} />
-        <NumberField label="Columns" value={columns} onCommit={(value) => setColumns(Math.max(1, Math.round(value)))} />
-        <NumberField label="Gap" value={gap} suffix="mm" onCommit={(value) => setGap(Math.max(0, value))} />
-        <label className="field">
-          <span>Orientation</span>
-          <select value={orientation} onChange={(event) => setOrientation(event.target.value as SolarPanelObject["orientation"])}>
-            <option value="portrait">Portrait</option>
-            <option value="landscape">Landscape</option>
+      </div>
+    </section>
+  );
+}
+
+function CustomModuleDialog({
+  onCancel,
+  onSave
+}: {
+  onCancel: () => void;
+  onSave: (module: SolarModuleItem) => void;
+}) {
+  const [manufacturer, setManufacturer] = useState("");
+  const [model, setModel] = useState("");
+  const [wattage, setWattage] = useState("550");
+  const [widthMM, setWidthMM] = useState("1134");
+  const [heightMM, setHeightMM] = useState("2278");
+  const [thicknessMM, setThicknessMM] = useState("35");
+  const [cellType, setCellType] = useState<CellTechnology>("mono-perc");
+  const [vOc, setVOc] = useState("49.8");
+  const [iSc, setISc] = useState("13.98");
+  const [vMp, setVMp] = useState("41.95");
+  const [iMp, setIMp] = useState("13.12");
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!manufacturer.trim() || !model.trim()) return;
+    const w = Number(wattage);
+    const width = Number(widthMM);
+    const height = Number(heightMM);
+    const thick = Number(thicknessMM);
+    if (!w || !width || !height) return;
+
+    onSave({
+      id: `custom-${Date.now()}`,
+      manufacturer: manufacturer.trim(),
+      model: model.trim(),
+      wattage: w,
+      widthMM: width,
+      heightMM: height,
+      thicknessMM: thick || 35,
+      cellType,
+      vOc: Number(vOc) || undefined,
+      iSc: Number(iSc) || undefined,
+      vMp: Number(vMp) || undefined,
+      iMp: Number(iMp) || undefined
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" style={{ zIndex: 9999 }}>
+      <form className="modal-card" onSubmit={handleSubmit} style={{ maxWidth: "440px", width: "95%" }}>
+        <h2>Add Custom Solar Module</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+          <label className="field stacked">
+            <span>Manufacturer</span>
+            <input
+              required
+              autoFocus
+              placeholder="e.g. SunPower"
+              value={manufacturer}
+              onChange={(e) => setManufacturer(e.target.value)}
+            />
+          </label>
+          <label className="field stacked">
+            <span>Model Name</span>
+            <input
+              required
+              placeholder="e.g. Maxeon 6"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            />
+          </label>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+          <label className="field stacked">
+            <span>Power (W)</span>
+            <input
+              type="number"
+              required
+              value={wattage}
+              onChange={(e) => setWattage(e.target.value)}
+            />
+          </label>
+          <label className="field stacked">
+            <span>Width (mm)</span>
+            <input
+              type="number"
+              required
+              value={widthMM}
+              onChange={(e) => setWidthMM(e.target.value)}
+            />
+          </label>
+          <label className="field stacked">
+            <span>Height (mm)</span>
+            <input
+              type="number"
+              required
+              value={heightMM}
+              onChange={(e) => setHeightMM(e.target.value)}
+            />
+          </label>
+        </div>
+        <label className="field stacked">
+          <span>Cell Technology</span>
+          <select value={cellType} onChange={(e) => setCellType(e.target.value as CellTechnology)}>
+            <option value="mono-perc">Monocrystalline PERC</option>
+            <option value="topcon">N-type TOPCon</option>
+            <option value="bifacial">Bifacial Dual-Glass</option>
+            <option value="hjt">Heterojunction (HJT)</option>
+            <option value="polycrystalline">Polycrystalline</option>
+            <option value="thin-film">Thin Film</option>
           </select>
         </label>
-      </div>
-      <div className="layout-actions">
-        <button className="primary-action" onClick={addGrid} disabled={!activeRoof}>
-          Create Grid
-        </button>
-        <button className="secondary-action" onClick={autoFill} disabled={!activeRoof || !canAutoFill}>
-          Auto Fill Roof
-        </button>
-      </div>
-      <p className="fine-print">
-        {roofs.length === 0
-          ? "Draw a roof first to place arrays automatically."
-          : "Panels are only added where the full module footprint fits inside the selected roof."}
-      </p>
-    </section>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+          <label className="field stacked">
+            <span>Voc (V)</span>
+            <input value={vOc} onChange={(e) => setVOc(e.target.value)} placeholder="Open Circuit" />
+          </label>
+          <label className="field stacked">
+            <span>Isc (A)</span>
+            <input value={iSc} onChange={(e) => setISc(e.target.value)} placeholder="Short Circuit" />
+          </label>
+        </div>
+        <div className="modal-actions" style={{ marginTop: "12px" }}>
+          <button type="button" className="secondary-action" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="primary-action">
+            Save & Use Module
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -361,9 +883,17 @@ function SolarProperties({
   const [verticalGap, setVerticalGap] = useState(object.moduleGap);
   const [orientation, setOrientation] = useState(object.orientation);
 
+  const document = useCadStore((state) => state.document);
+  const selectSubarray = useCadStore((state) => state.selectSubarray);
+
   const makeArray = () => {
     const panels = buildSolarArray(object, { rows, columns, horizontalGap, verticalGap, orientation });
-    const newPanels = panels.slice(1);
+    const newPanels = panels.slice(1).map((p) => ({
+      ...p,
+      subarrayId: object.subarrayId,
+      rackingType: object.rackingType,
+      rackTiltDeg: object.rackTiltDeg
+    }));
     const currentDocument = useCadStore.getState().document;
     const roofs = currentDocument.objects.filter((o): o is RoofObject => o.type === "roof");
     const existingPanels = currentDocument.objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
@@ -407,6 +937,64 @@ function SolarProperties({
           <option value="landscape">Landscape</option>
         </select>
       </label>
+
+      {/* Subarray Assignment */}
+      <label className="field">
+        <span>Subarray</span>
+        <select
+          value={object.subarrayId ?? ""}
+          onChange={(event) => {
+            const nextSubId = event.target.value || undefined;
+            updateObject(object.id, { subarrayId: nextSubId } as Partial<CadObject>);
+          }}
+        >
+          <option value="">Unassigned</option>
+          {(document.subarrays ?? []).map((sub) => (
+            <option key={sub.id} value={sub.id}>
+              {sub.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {object.subarrayId && (
+        <button
+          type="button"
+          className="secondary-action"
+          style={{ width: "100%", padding: "4px 8px", fontSize: "11px", marginBottom: "8px" }}
+          onClick={() => selectSubarray(object.subarrayId!)}
+        >
+          Select All in Subarray
+        </button>
+      )}
+
+      {/* Racking Type */}
+      <label className="field">
+        <span>Racking</span>
+        <select
+          value={object.rackingType ?? "flush"}
+          onChange={(event) =>
+            updateObject(object.id, { rackingType: event.target.value as SubarrayRackingType } as Partial<CadObject>)
+          }
+        >
+          <option value="flush">Flush Mount</option>
+          <option value="tilted_rack">Tilted Rack</option>
+          <option value="ballasted">Ballasted</option>
+          <option value="ground_mount">Ground Mount</option>
+        </select>
+      </label>
+
+      {(object.rackingType === "tilted_rack" || object.rackingType === "ballasted") && (
+        <NumberField
+          label="Rack Tilt"
+          value={object.rackTiltDeg ?? 15}
+          suffix="deg"
+          onCommit={(rackTiltDeg) =>
+            updateObject(object.id, { rackTiltDeg: Math.max(0, Math.min(60, rackTiltDeg)) } as Partial<CadObject>)
+          }
+        />
+      )}
+
       {object.warning && <p className="warning">{object.warning}</p>}
       <div className="array-box">
         <h3>Array Generator</h3>
@@ -621,88 +1209,6 @@ function labelFor(object: CadObject) {
 
 function round(value: number) {
   return Math.round(value * 100) / 100;
-}
-
-function createPanelsForRoofGrid({
-  roof,
-  module,
-  rows,
-  columns,
-  gap,
-  orientation,
-  zIndexStart,
-  layerId,
-  existingPanels,
-  obstructions,
-  restrictedZones
-}: {
-  roof: RoofObject;
-  module: (typeof sampleSolarModules)[number];
-  rows: number;
-  columns: number;
-  gap: number;
-  orientation: SolarPanelObject["orientation"];
-  zIndexStart: number;
-  layerId: string;
-  existingPanels: SolarPanelObject[];
-  obstructions: Extract<CadObject, { type: "obstruction" }>[];
-  restrictedZones: Extract<CadObject, { type: "restrictedZone" }>[];
-}) {
-  const seed = createSolarPanel({ x: 0, y: 0 }, module, layerId, zIndexStart, orientation);
-  seed.rotation = roof.azimuth;
-  const roofBox = getBoundingBox(roof);
-  const origin = { x: roofBox.x + roofBox.width / 2, y: roofBox.y + roofBox.height / 2 };
-  const usableRoofPoints = roofUsablePolygon(roof, 25.4);
-  const localRoofPoints = usableRoofPoints.map((point) => rotatePoint(point, origin, -roof.azimuth));
-  const box = boundsFromPoints(localRoofPoints);
-  const startX = box.x;
-  const startY = box.y;
-  const maxX = box.x + box.width - seed.width;
-  const maxY = box.y + box.height - seed.height;
-  const panels: SolarPanelObject[] = [];
-  let skipped = 0;
-  const rowLimit = Math.min(rows, 120);
-  const columnLimit = Math.min(columns, 120);
-
-  if (localRoofPoints.length < 3 || maxX < startX || maxY < startY) {
-    return { panels, skipped: rowLimit * columnLimit };
-  }
-
-  for (let row = 0; row < rowLimit; row += 1) {
-    const y = startY + row * (seed.height + gap);
-    if (y > maxY) break;
-    for (let column = 0; column < columnLimit; column += 1) {
-      const x = startX + column * (seed.width + gap);
-      if (x > maxX) break;
-      const localPanelPoints = [
-        { x, y },
-        { x: x + seed.width, y },
-        { x: x + seed.width, y: y + seed.height },
-        { x, y: y + seed.height }
-      ];
-      if (!polygonContainsPolygon(localRoofPoints, localPanelPoints)) {
-        skipped += 1;
-        continue;
-      }
-      const topLeftWorld = rotatePoint({ x, y }, origin, roof.azimuth);
-      const panel = createSolarPanel(
-        topLeftWorld,
-        module,
-        layerId,
-        zIndexStart + panels.length,
-        orientation
-      );
-      panel.moduleGap = gap;
-      panel.rotation = roof.azimuth;
-      if (validatePanelPlacement(panel, { roofs: [roof], existingPanels: [...existingPanels, ...panels], obstructions, restrictedZones, clearanceMm: 25.4 }).valid) {
-        panels.push(panel);
-      } else {
-        skipped += 1;
-      }
-    }
-  }
-
-  return { panels, skipped };
 }
 
 function hasEntitlement(commercialAccess: CompanyCommercialSummary | null | undefined, key: string) {

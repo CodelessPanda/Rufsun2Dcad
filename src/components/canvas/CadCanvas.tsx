@@ -28,9 +28,13 @@ interface Props {
   stageRef: RefObject<Konva.Stage>;
   readOnly?: boolean;
   solarExposure?: ProjectSolarDataState;
+  /** Maps panel ID → 1-based position index for the number badge on each panel shape. */
+  panelIndexMap?: Record<string, number>;
+  /** Panel ID to highlight with a cyan ring (driven by table row hover in the energy panel). */
+  highlightedPanelId?: string | null;
 }
 
-export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) {
+export function CadCanvas({ stageRef, readOnly = false, solarExposure, panelIndexMap, highlightedPanelId }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodesRef = useRef<Record<string, Konva.Node | null>>({});
@@ -364,8 +368,11 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) 
   };
 
   const handleObjectSelect = (id: string, additive: boolean) => {
-    if (activeTool !== "select" && !readOnly) return;
+    // In readOnly (energy view), always allow selection regardless of active tool.
+    // In editor mode, only allow selection when the select tool is active.
+    if (!readOnly && activeTool !== "select") return;
     const object = document.objects.find((item) => item.id === id);
+    // In editor mode, restrict to the active layer. In readOnly, allow any layer.
     if (!object || (!readOnly && object.layerId !== document.settings.activeLayerId)) return;
     if (additive) toggleSelect(id);
     else selectOnly(id);
@@ -548,6 +555,8 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure }: Props) 
                 draggable={!readOnly && activeTool === "select" && !locked}
                 listening={readOnly || activeTool !== "select" || object.layerId === document.settings.activeLayerId}
                 scale={viewport.scale}
+                panelNumber={object.type === "solarPanel" ? panelIndexMap?.[object.id] : undefined}
+                highlighted={object.type === "solarPanel" ? object.id === highlightedPanelId : undefined}
                 registerNode={(id, node) => {
                   nodesRef.current[id] = node;
                 }}

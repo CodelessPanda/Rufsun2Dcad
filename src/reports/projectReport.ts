@@ -76,7 +76,7 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
   const panels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
   const installedPanels = filterPanelsOnRoofs(panels, roofs);
-  const annualFluxByPanelId = buildPanelAnnualFluxMap(installedPanels, solarExposure);
+  const annualFluxByPanelId = buildPanelAnnualFluxMap(installedPanels, roofs, solarExposure);
   const annualFluxByRoofId = buildRoofAnnualFluxMap(roofs, solarExposure);
   const energy = calculateAllPeriods({
     panels,

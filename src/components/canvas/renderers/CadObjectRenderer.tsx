@@ -1,4 +1,4 @@
-import type Konva from "konva";
+﻿import type Konva from "konva";
 import type { CadObject } from "../../../types/cad";
 import { CircleRenderer, DimensionRenderer, LineRenderer, MapImageRenderer, PolygonRenderer, RectangleRenderer, TextRenderer } from "./BasicRenderers";
 import { SolarPanelRenderer } from "./SolarPanelRenderer";
@@ -9,6 +9,10 @@ interface Props {
   draggable: boolean;
   listening: boolean;
   scale: number;
+  /** Passed through to SolarPanelRenderer only — 1-based position index badge. */
+  panelNumber?: number;
+  /** Passed through to SolarPanelRenderer only — cyan highlight ring. */
+  highlighted?: boolean;
   registerNode: (id: string, node: Konva.Node | null) => void;
   onSelect: (id: string, additive: boolean) => void;
   onDragStart: (id: string, node: Konva.Node) => void;
@@ -37,7 +41,12 @@ export function CadObjectRenderer(props: Props) {
     case "dimension":
       return <DimensionRenderer {...props} object={props.object} />;
     case "solarPanel":
-      return <SolarPanelRenderer {...props} object={props.object} />;
+      return <SolarPanelRenderer
+        {...props}
+        object={props.object}
+        panelNumber={props.panelNumber}
+        highlighted={props.highlighted}
+      />;
     case "mapImage":
       return <MapImageRenderer {...props} object={props.object} />;
   }

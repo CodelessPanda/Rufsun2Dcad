@@ -89,6 +89,9 @@ export function App() {
   });
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [googleMapsApiKey, setGoogleMapsApiKey] = useState(() => localStorage.getItem("rufsun.googleMapsApiKey") ?? "");
+  // Panel identification: shared between EnergyAnalysisPanel and CadCanvas
+  const [panelIndexMap, setPanelIndexMap] = useState<Record<string, number>>({});
+  const [highlightedPanelId, setHighlightedPanelId] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(() => {
     const saved = Number(localStorage.getItem("rufsun.panelWidth"));
     return saved >= 280 && saved <= 1600 ? saved : 310;
@@ -711,14 +714,29 @@ export function App() {
                 <LeftToolbar viewMode={viewMode} setViewMode={setViewMode} />
                 <CadCanvas stageRef={stageRef} solarExposure={solarExposure} />
                 <div className="panel-resize-handle" onMouseDown={startResize} />
-                <PropertiesPanel commercialAccess={companyCommercial} />
+                <PropertiesPanel commercialAccess={companyCommercial} solarExposure={solarExposure} />
               </>
             ) : (
               <>
                 <LeftToolbar viewMode={viewMode} setViewMode={setViewMode} />
-                <CadCanvas stageRef={stageRef} readOnly solarExposure={solarExposure} />
+                <CadCanvas
+                  stageRef={stageRef}
+                  readOnly
+                  solarExposure={solarExposure}
+                  panelIndexMap={panelIndexMap}
+                  highlightedPanelId={highlightedPanelId}
+                />
                 <div className="panel-resize-handle" onMouseDown={startResize} />
-                <EnergyAnalysisPanel solarExposure={solarExposure} />
+                <EnergyAnalysisPanel
+                  solarExposure={solarExposure}
+                  projectId={activeProjectId ?? undefined}
+                  workspaceId={activeWorkspaceId ?? undefined}
+                  mapCapture={document.mapCapture}
+                  googleApiKey={googleMapsApiKey ?? undefined}
+                  solarRegistration={solarExposure.registration}
+                  onPanelIndexMapChange={setPanelIndexMap}
+                  onHighlightedPanelChange={setHighlightedPanelId}
+                />
               </>
             )}
           </main>

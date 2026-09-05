@@ -157,7 +157,10 @@ const objectSchema = z.discriminatedUnion("type", [
     wattage: z.number().positive(),
     orientation: z.enum(["portrait", "landscape"]),
     moduleGap: z.number().nonnegative(),
-    warning: z.string().optional()
+    warning: z.string().optional(),
+    subarrayId: z.string().optional(),
+    rackingType: z.enum(["flush", "tilted_rack", "ballasted", "ground_mount"]).optional(),
+    rackTiltDeg: z.number().optional()
   }),
   baseSchema.extend({
     type: z.literal("mapImage"),
@@ -177,6 +180,15 @@ const objectSchema = z.discriminatedUnion("type", [
   })
 ]);
 
+export const subarrayConfigSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  roofId: z.string().optional(),
+  rackingType: z.enum(["flush", "tilted_rack", "ballasted", "ground_mount"]).optional(),
+  rackTiltDeg: z.number().optional(),
+  color: z.string().optional()
+});
+
 export const documentSchema = z.object({
   rufsunCadVersion: z.literal("0.2"),
   version: z.string(),
@@ -195,6 +207,7 @@ export const documentSchema = z.object({
   }).optional(),
   solarRegistration: solarRegistrationSchema.optional(),
   site: siteSchema.optional(),
+  subarrays: z.array(subarrayConfigSchema).optional(),
   units: z.literal("mm"),
   objects: z.array(objectSchema),
   layers: z.array(

@@ -116,7 +116,10 @@ export function createSolarPanel(
   module: SolarModuleCatalogItem,
   layerId: string,
   zIndex: number,
-  orientation: "portrait" | "landscape" = "portrait"
+  orientation: "portrait" | "landscape" = "portrait",
+  subarrayId?: string,
+  rackingType?: "flush" | "tilted_rack" | "ballasted" | "ground_mount",
+  rackTiltDeg?: number
 ): SolarPanelObject {
   const width = orientation === "portrait" ? module.widthMM : module.heightMM;
   const height = orientation === "portrait" ? module.heightMM : module.widthMM;
@@ -137,7 +140,10 @@ export function createSolarPanel(
     thickness: module.thicknessMM,
     wattage: module.wattage,
     orientation,
-    moduleGap: 20
+    moduleGap: 20,
+    subarrayId,
+    rackingType,
+    rackTiltDeg
   };
 }
 

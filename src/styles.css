@@ -1464,6 +1464,38 @@ button {
   border-color: #16855f;
 }
 
+/* ── Roof scope selector ───────────────────────────────────────────────── */
+.roof-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+
+.roof-tab {
+  padding: 5px 10px;
+  border: 1px solid #d5dce5;
+  border-radius: 14px;   /* pill shape to distinguish from period tabs */
+  color: #475569;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  white-space: nowrap;
+}
+
+.roof-tab:hover {
+  border-color: #16855f;
+  background: #edf8f3;
+}
+
+.roof-tab.active {
+  color: #ffffff;
+  background: #16855f;
+  border-color: #16855f;
+}
+
 .info-message {
   padding: 10px;
   border-radius: 5px;
@@ -3024,3 +3056,275 @@ button {
   to   { opacity: 0; transform: translateX(-50%) translateY(12px); }
 }
 
+
+/* -- Real Solar Flux UI additions ----------------------------------- */
+
+/* Data source confidence badge */
+.data-source-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.data-source-high   { background: rgba(34,197,94,0.12);  color: #16a34a; }
+.data-source-medium { background: rgba(234,179,8,0.12);  color: #ca8a04; }
+.data-source-low    { background: rgba(249,115,22,0.12); color: #ea580c; }
+.data-source-none   { background: rgba(239,68,68,0.1);   color: #dc2626; }
+.data-source-loading{ background: rgba(148,163,184,0.1); color: #64748b; }
+
+/* Spinning animation for Loader2 icon */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* Best / Worst panel callout */
+.flux-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(148,163,184,0.07);
+  border: 1px solid rgba(148,163,184,0.15);
+}
+.flux-callout-best  { color: #16a34a; font-weight: 600; }
+.flux-callout-worst { color: #ea580c; font-weight: 500; }
+
+/* Collapsible Panel Details header */
+.collapsible-header {
+  all: unset;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+  padding-bottom: 4px;
+}
+.collapsible-header h3 { margin: 0; }
+
+/* Weak panel row highlight */
+.flux-row-weak td { color: #ea580c; }
+
+/* Flux method badge */
+.flux-method {
+  font-size: 9.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.flux-method-areaavg    { background: rgba(34,197,94,0.12);  color: #16a34a; }
+.flux-method-centerpoint{ background: rgba(234,179,8,0.12);  color: #ca8a04; }
+.flux-method-roofavg    { background: rgba(148,163,184,0.12);color: #64748b; }
+
+/* ── CO₂ offset card ───────────────────────────────────────────────────── */
+.co2-card {
+  display: flex;
+  gap: 12px;
+  margin: 8px 0 4px;
+}
+
+.co2-stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 8px;
+  background: linear-gradient(135deg, #edf8f3 0%, #d4f0e4 100%);
+  border: 1px solid #a7e3c5;
+  border-radius: 8px;
+}
+
+.co2-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #16855f;
+  line-height: 1.2;
+}
+
+.co2-unit {
+  font-size: 10px;
+  color: #4b7a63;
+  margin-top: 2px;
+  text-align: center;
+}
+
+/* ── Extended panel details table ──────────────────────────────────────── */
+.panel-detail-table table {
+  font-size: 10px;
+}
+
+.panel-detail-table thead th {
+  line-height: 1.2;
+  padding: 4px 5px;
+  text-align: center;
+}
+
+.panel-detail-table thead th em {
+  display: block;
+  font-style: normal;
+  font-weight: 400;
+  color: #94a3b8;
+  font-size: 9px;
+}
+
+.panel-detail-table tbody td {
+  text-align: center;
+  padding: 4px 5px;
+}
+
+.panel-detail-total td {
+  font-weight: 600;
+  border-top: 1px solid #d5dce5;
+  padding: 5px;
+  text-align: center;
+  background: #f8fafc;
+}
+
+/* ── Relocate styles ───────────────────────────────────────────────────── */
+.flux-row-relocate {
+  background: #fff5f5;
+  color: #991b1b;
+}
+
+.flux-row-relocate td {
+  border-bottom-color: #fecaca;
+}
+
+.relocate-dot {
+  color: #ef4444;
+  font-size: 8px;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+
+.relocate-banner {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-left: 3px solid #f97316;
+  border-radius: 5px;
+  font-size: 11px;
+  color: #9a3412;
+  line-height: 1.5;
+}
+
+/* ── Interactive panel detail rows ────────────────────────────────────── */
+.panel-detail-row {
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.panel-detail-row:hover {
+  background: #e8f4fd !important;
+}
+
+.panel-detail-row:hover td {
+  color: #0369a1;
+}
+
+/* Panel number badge in the # column — matches canvas badge */
+.panel-badge-num {
+  display: inline-block;
+  background: #1e293b;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 10px;
+  letter-spacing: 0.03em;
+  margin-right: 2px;
+}
+
+/* ── Focused panel card (appears on canvas tap) ───────────────────────── */
+.focused-panel-card {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #93c5fd;
+  border-left: 3px solid #2563eb;
+  border-radius: 8px;
+  margin: 0 0 2px;
+}
+
+.focused-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.focused-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1d4ed8;
+}
+
+.focused-panel-dismiss {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.focused-panel-dismiss:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.focused-panel-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.focused-panel-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 4px;
+  background: rgba(255,255,255,0.7);
+  border-radius: 6px;
+  border: 1px solid #bfdbfe;
+}
+
+.fp-val {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1e40af;
+  line-height: 1.2;
+}
+
+.fp-lbl {
+  font-size: 9px;
+  color: #6b7280;
+  margin-top: 2px;
+  text-align: center;
+}
+
+.focused-panel-method {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ── Focused row in the panel details table ────────────────────────────── */
+.panel-row-focused {
+  background: #eff6ff !important;
+  outline: 2px solid #2563eb;
+  outline-offset: -2px;
+}
+
+.panel-row-focused td {
+  color: #1d4ed8 !important;
+  font-weight: 600;
+}
