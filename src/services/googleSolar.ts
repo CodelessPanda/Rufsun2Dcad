@@ -6,6 +6,8 @@ import { createSolarGeoTransform, normalizeSolarRegistration } from "../cad/sola
 import type { ProjectSolarDataState, SolarLayerTransforms } from "../cad/solar/solarExposureTypes";
 import { decodeNumericSolarGeoTiff, decodeRgbSolarGeoTiff, type SolarNumericRaster, type SolarRgbRaster } from "../cad/solar/solarRaster";
 import { DEFAULT_SOLAR_DEBUG_LAYERS } from "./solarExposureState";
+import { setFluxCache } from "../cad/solar/solarFluxCache";
+
 
 export async function loadProjectSolarExposure(params: {
   workspaceId: string;
@@ -46,6 +48,12 @@ export async function loadProjectSolarExposure(params: {
   const registration = normalizeSolarRegistration(params.registration);
   const transforms = createTransforms(params.mapCapture, registration, { annualFlux, rgb, dsm, mask });
 
+  // Populate the flux cache so the energy panel can use real data even when
+  // the user hasn't opened the solar heatmap layer.
+  if (transforms.annualFlux) {
+    setFluxCache(params.projectId, annualFlux, transforms.annualFlux);
+  }
+
   return {
     status: "ready",
     visible: true,
@@ -65,6 +73,42 @@ export async function loadProjectSolarExposure(params: {
     loadedAt: new Date().toISOString()
   };
 }
+
+/**
+ * Lightweight flux-only loader for the energy panel.
+ *
+ * Fetches only the `annualFlux` GeoTiff (~200KB) without loading the heavier
+ * RGB, DSM, or mask layers (~2MB total).  Populates the flux cache so that
+ * subsequent calls to `buildPanelAnnualFluxMap` receive real data without the
+ * user needing to open the solar heatmap overlay.
+ *
+ * Returns `true` on success, `false` if data is unavailable for the location.
+ */
+export async function loadFluxOnly(params: {
+  workspaceId: string;
+  projectId: string;
+  mapCapture: MapCaptureSettings;
+  googleApiKey?: string;
+  registration?: Partial<SolarRegistration>;
+}): Promise<boolean> {
+  try {
+    const dataLayers = await api.solarDataLayers(params.workspaceId, params.projectId, params.googleApiKey);
+    if (!dataLayers.hasAnnualFlux) return false;
+
+    const annualBuffer = await api.solarAnnualFluxTiff(params.workspaceId, params.projectId, params.googleApiKey);
+    const annualFlux = await decodeAnnualFluxGeoTiff(annualBuffer);
+    const registration = normalizeSolarRegistration(params.registration);
+    const transform = createSolarGeoTransform(params.mapCapture, annualFlux, registration);
+
+    setFluxCache(params.projectId, annualFlux, transform);
+    return true;
+  } catch (error) {
+    console.warn("loadFluxOnly failed:", error);
+    return false;
+  }
+}
+
+
 
 export function updateSolarExposureOpacity(state: ProjectSolarDataState, opacity: number): ProjectSolarDataState {
   if (!state.annualFlux) return { ...state, opacity };

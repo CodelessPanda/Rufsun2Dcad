@@ -19,6 +19,16 @@ export function validateCadDocument(documentJson: unknown, schemaVersion = "1") 
   if (document.layers !== undefined && !Array.isArray(document.layers)) errors.push("Document layers must be an array.");
   if (document.settings !== undefined && !isRecord(document.settings)) errors.push("Document settings must be an object.");
   if (document.site !== undefined) validateSite(document.site, errors);
+  if (document.subarrays !== undefined) {
+    if (!Array.isArray(document.subarrays)) errors.push("Document subarrays must be an array.");
+    else {
+      document.subarrays.forEach((subarray, index) => {
+        if (!isRecord(subarray) || !isString(subarray.id) || !isString(subarray.name)) {
+          errors.push(`Subarray ${index + 1} must include id and name.`);
+        }
+      });
+    }
+  }
 
   if (Array.isArray(document.objects)) {
     document.objects.slice(0, 3000).forEach((object, index) => validateObject(object, index, errors));

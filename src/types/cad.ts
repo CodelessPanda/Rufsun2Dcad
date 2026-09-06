@@ -229,6 +229,17 @@ export interface DimensionObject extends CadObjectBase {
   mode: "horizontal" | "vertical" | "aligned";
 }
 
+export type SubarrayRackingType = "flush" | "tilted_rack" | "ballasted" | "ground_mount";
+
+export interface SubarrayConfig {
+  id: string;
+  name: string;
+  roofId?: string;
+  rackingType?: SubarrayRackingType;
+  rackTiltDeg?: number;
+  color?: string;
+}
+
 export interface SolarPanelObject extends CadObjectBase {
   type: "solarPanel";
   manufacturer: string;
@@ -240,6 +251,9 @@ export interface SolarPanelObject extends CadObjectBase {
   orientation: "portrait" | "landscape";
   moduleGap: number;
   warning?: string;
+  subarrayId?: string;
+  rackingType?: SubarrayRackingType;
+  rackTiltDeg?: number;
 }
 
 export type CadObject =
@@ -283,6 +297,7 @@ export interface RufsunCadDocument {
   mapCapture?: MapCaptureSettings;
   solarRegistration?: SolarRegistration;
   site?: SiteModel;
+  subarrays?: SubarrayConfig[];
   units: CadUnits;
   objects: CadObject[];
   layers: CadLayer[];

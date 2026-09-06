@@ -264,7 +264,10 @@ function readAffine(image: geotiff.GeoTIFFImage, warnings: string[]) {
   try {
     const [originX, originY] = image.getOrigin();
     const [scaleX, scaleY] = image.getResolution();
-    return { originX, originY, scaleX, scaleY, skewX: 0, skewY: 0 };
+    // getResolution() returns positive scaleY per ModelPixelScaleTag spec.
+    // A north-up GeoTIFF needs negative scaleY: pixel-row 0 = northernmost row,
+    // so latitude DECREASES as pixel Y increases. We force the sign negative.
+    return { originX, originY, scaleX, scaleY: -Math.abs(scaleY), skewX: 0, skewY: 0 };
   } catch (error) {
     warnings.push(`GeoTIFF affine transform could not be read: ${formatError(error)}`);
     return { originX: 0, originY: 0, scaleX: 1, scaleY: 1, skewX: 0, skewY: 0 };

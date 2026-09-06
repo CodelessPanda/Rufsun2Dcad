@@ -1,19 +1,24 @@
 import { findContainingRoof, roofContainsPanel } from "../geometry/geometry";
 import type { SolarPanelObject, RoofObject } from "../../types/cad";
 import { DEFAULT_ELECTRICITY_RATE_INR, DEFAULT_INSTALL_COST_PER_WATT_INR } from "../finance/currency";
+import type { PanelFluxMap } from "../solar/solarAnalysis";
 
 export type TimePeriod = "today" | "week" | "month" | "year";
+
+/** How reliable the energy estimate is based on the data sources used. */
+export type FluxConfidence = "high" | "medium" | "low" | "none";
 
 export interface EnergyCalculationParams {
   panels: SolarPanelObject[];
   roofs: RoofObject[];
-  averageRadiance: number; // W/m², mean daytime irradiance used when no weather data is available
-  annualFluxByPanelId?: Record<string, number>; // kWh/kW/year sampled from Google Solar API under each panel
+  averageRadiance: number; // W/m², mean daytime irradiance used when no real data is available
+  annualFluxByPanelId?: PanelFluxMap; // per-panel real flux from Google Solar API
   annualFluxByRoofId?: Record<string, number>; // kWh/kW/year from Google Solar API annual flux layer
   temperatureCorrectionFactor?: number; // Default: 0.95 (accounts for temperature losses)
   sunlightHours?: number; // Default: 6 (average usable sunlight hours per day)
   electricityRate?: number; // Default: INR per kWh
 }
+
 
 export interface EnergyGenerationResult {
   period: TimePeriod;
@@ -27,6 +32,8 @@ export interface EnergyGenerationResult {
   dailyPeakSunHours: number;
   performanceRatio: number; // % (temperature + angle factor applied to generation)
   dataSource: "solar-api" | "assumption";
+  /** Confidence in the energy estimate based on the sampling method used. */
+  fluxConfidence: FluxConfidence;
   averageAnnualFlux?: number;
 }
 
@@ -165,7 +172,8 @@ export function calculateEnergyGeneration(
     totalCapacity: 0,
     dailyPeakSunHours: 0,
     performanceRatio: 0,
-    dataSource: "assumption"
+    dataSource: "assumption",
+    fluxConfidence: "none"
   };
 
   if (panelsOnRoofs.length === 0) {
@@ -178,8 +186,7 @@ export function calculateEnergyGeneration(
   const systemCapacity = calculateSystemCapacity(panelsOnRoofs);
   const panelCount = panelsOnRoofs.length;
 
-  // Fixed date so the dummy weather data stays consistent across periods
-  const now = new Date("2026-08-14");
+  const now = new Date();
   const { startDate, daysInPeriod } = periodDateRange(now, period);
 
   // Average irradiance across the available weather days for this period
@@ -189,8 +196,7 @@ export function calculateEnergyGeneration(
       ? weatherData.reduce((sum, data) => sum + data.radiance, 0) / weatherData.length
       : params.averageRadiance;
 
-  // Average angle/azimuth efficiency across all panels, using the roof that
-  // geometrically contains each panel for its tilt and azimuth
+  // Average angle/azimuth efficiency across all panels
   const angleEfficiency =
     panelsOnRoofs.reduce(
       (sum, panel) => sum + calculateAngleEfficiency(panel, findContainingRoof(panel, params.roofs)),
@@ -213,6 +219,7 @@ export function calculateEnergyGeneration(
       dailyPeakSunHours: round(solarApiEstimate.averageAnnualFlux / 365),
       performanceRatio: round(temperatureFactor * 100),
       dataSource: "solar-api",
+      fluxConfidence: solarApiEstimate.confidence,
       averageAnnualFlux: round(solarApiEstimate.averageAnnualFlux)
     };
   }
@@ -239,39 +246,83 @@ export function calculateEnergyGeneration(
     totalCapacity: round(systemCapacity),
     dailyPeakSunHours: round(peakSunHours),
     performanceRatio: round(performanceRatio * 100),
-    dataSource: "assumption"
+    dataSource: "assumption",
+    fluxConfidence: "none"
   };
 }
+
 
 function calculateSolarApiAnnualEstimate(
   panels: SolarPanelObject[],
   roofs: RoofObject[],
-  annualFluxByPanelId: Record<string, number> | undefined,
+  annualFluxByPanelId: PanelFluxMap | undefined,
   annualFluxByRoofId: Record<string, number> | undefined,
   temperatureFactor: number
 ) {
   if (!annualFluxByPanelId && !annualFluxByRoofId) return null;
+
   let annualEnergyKwh = 0;
   let capacityWithFlux = 0;
   let weightedFlux = 0;
 
+  // Track methods used to compute confidence level
+  let countAreaAvg = 0;
+  let countCenterPoint = 0;
+  let countRoofAvg = 0;
+  let countFallback = 0; // used roof-level from annualFluxByRoofId (legacy path)
+
   for (const panel of panels) {
     const roof = findContainingRoof(panel, roofs);
+
+    // Try enriched per-panel map first (new path)
+    const panelEntry = annualFluxByPanelId?.[panel.id];
+    if (panelEntry && typeof panelEntry.flux === "number" && Number.isFinite(panelEntry.flux) && panelEntry.flux > 0) {
+      const capacityKwp = panel.wattage / 1000;
+      annualEnergyKwh += capacityKwp * panelEntry.flux * temperatureFactor;
+      capacityWithFlux += capacityKwp;
+      weightedFlux += panelEntry.flux * capacityKwp;
+      if (panelEntry.method === "area-avg") countAreaAvg++;
+      else if (panelEntry.method === "center-point") countCenterPoint++;
+      else countRoofAvg++;
+      continue;
+    }
+
+    // Legacy fallback: plain number map or roof-level average
     if (!roof) continue;
-    const annualFlux = annualFluxByPanelId?.[panel.id] ?? annualFluxByRoofId?.[roof.id];
-    if (typeof annualFlux !== "number" || !Number.isFinite(annualFlux) || annualFlux <= 0) continue;
+    const legacyFlux = annualFluxByRoofId?.[roof.id];
+    if (typeof legacyFlux !== "number" || !Number.isFinite(legacyFlux) || legacyFlux <= 0) continue;
     const capacityKwp = panel.wattage / 1000;
-    annualEnergyKwh += capacityKwp * annualFlux * temperatureFactor;
+    annualEnergyKwh += capacityKwp * legacyFlux * temperatureFactor;
     capacityWithFlux += capacityKwp;
-    weightedFlux += annualFlux * capacityKwp;
+    weightedFlux += legacyFlux * capacityKwp;
+    countFallback++;
   }
 
   if (annualEnergyKwh <= 0 || capacityWithFlux <= 0) return null;
+
+  // Derive confidence:
+  //   high   → all panels used area-avg
+  //   medium → mix of area-avg + center-point, or all center-point
+  //   low    → any panel used roof-avg or legacy fallback
+  const totalPanels = countAreaAvg + countCenterPoint + countRoofAvg + countFallback;
+  let confidence: FluxConfidence;
+  if (totalPanels === 0) {
+    confidence = "none";
+  } else if (countAreaAvg === totalPanels) {
+    confidence = "high";
+  } else if (countRoofAvg === 0 && countFallback === 0) {
+    confidence = "medium"; // some center-point but no roof averages
+  } else {
+    confidence = "low"; // at least one panel fell back to roof-level data
+  }
+
   return {
     annualEnergyKwh,
-    averageAnnualFlux: weightedFlux / capacityWithFlux
+    averageAnnualFlux: weightedFlux / capacityWithFlux,
+    confidence
   };
 }
+
 
 function periodDateRange(now: Date, period: TimePeriod): { startDate: Date; daysInPeriod: number } {
   const startDate = new Date(now);

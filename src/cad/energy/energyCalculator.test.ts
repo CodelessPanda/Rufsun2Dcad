@@ -33,7 +33,7 @@ describe("calculateAllPeriods", () => {
       panels: [panel],
       roofs: [roof],
       averageRadiance: 800,
-      annualFluxByPanelId: { [panel.id]: 1900 },
+      annualFluxByPanelId: { [panel.id]: { flux: 1900, method: "area-avg" as const } },
       annualFluxByRoofId: { [roof.id]: 1200 },
       temperatureCorrectionFactor: 0.95,
       sunlightHours: 6,
