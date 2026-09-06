@@ -3,7 +3,7 @@ import { jsPDF } from "jspdf";
 import { calculateArrayStats } from "../cad/array/array";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs, type EnergyGenerationResult } from "../cad/energy/energyCalculator";
 import { DEFAULT_ELECTRICITY_RATE_INR, CURRENCY_CODE, formatCurrency } from "../cad/finance/currency";
-import { distance, findContainingRoof, formatFeetInches, midpoint, polygonArea } from "../cad/geometry/geometry";
+import { distance, findContainingRoof, formatFeetInches, midpoint, polygonArea, roofUsablePolygon } from "../cad/geometry/geometry";
 import { buildPanelAnnualFluxMap, buildRoofAnnualFluxMap } from "../cad/solar/solarAnalysis";
 import { getRoofFluxStatistics } from "../cad/solar/solarStatistics";
 import { googleStaticMapUrl } from "../services/googleMaps";
@@ -25,8 +25,12 @@ interface ReportContext {
   layoutImage: string;
   mapImage: string;
   exposureImage: string;
+  coverImage: string;
   productionChart: string;
   financeChart: string;
+  dailyCurveChart: string;
+  irradianceChart: string;
+  savingsBreakdownChart: string;
   energy: Record<"today" | "week" | "month" | "year", EnergyGenerationResult>;
   costEstimate: ReturnType<typeof calculateSystemCostEstimate>;
   solarExposure?: ProjectSolarDataState;
@@ -36,15 +40,17 @@ const PAGE_W = 210;
 const PAGE_H = 297;
 const MARGIN = 14;
 const GREEN = "#16855f";
+const ORANGE = "#f28c28";
+const INK = "#07111f";
 const DARK = "#17212b";
 const MUTED = "#64748b";
 const LINE = "#d9e2e7";
-const PANEL = "#f7faf9";
 const REPORT_IMAGE_W = 900;
 const REPORT_IMAGE_H = 558;
 const CHART_W = 900;
 const CHART_H = 380;
 const JPEG_QUALITY = 0.72;
+const COVER_IMAGE_PATH = "/report-cover-solar.jpg";
 
 export async function exportProjectReportPdf(params: ExportProjectReportParams) {
   const context = await buildReportContext(params);
@@ -94,6 +100,11 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
   const exposureImage = await createExposureImage(document, roofs, solarExposure, mapImage);
   const productionChart = createProductionChart(energy);
   const financeChart = createFinanceChart(costEstimate);
+  const dailyCurveChart = createDailyCurveChart(energy);
+  const irradianceChart = createIrradianceChart(roofs, solarExposure);
+  const savingsBreakdownChart = createSavingsBreakdownChart(costEstimate, energy);
+  const coverBackgroundImage = await loadImageAsDataUrl(COVER_IMAGE_PATH).catch(() => createCoverFallbackImage());
+  const coverImage = await createCoverImage(document, coverBackgroundImage);
 
   return {
     document,
@@ -104,8 +115,12 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
     layoutImage,
     mapImage,
     exposureImage,
+    coverImage,
     productionChart,
     financeChart,
+    dailyCurveChart,
+    irradianceChart,
+    savingsBreakdownChart,
     energy,
     costEstimate,
     solarExposure
@@ -113,101 +128,65 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
 }
 
 function drawCover(pdf: jsPDF, context: ReportContext) {
-  drawFullBleedHeader(pdf);
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(24);
-  pdf.text("Solar Design Report", MARGIN, 32);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(10);
-  pdf.text("Prepared with RufsunCAD", MARGIN, 40);
-
-  pdf.setTextColor(23, 33, 43);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(18);
-  pdf.text(context.document.customerName || context.document.name, MARGIN, 67);
-  pdf.setFont("helvetica", "normal");
-  pdf.setFontSize(9);
-  wrapText(pdf, context.document.customerAddress || "Project address not provided", MARGIN, 75, 118, 4.5);
-  pdf.text(`Report date: ${new Date().toLocaleDateString()}`, MARGIN, 88);
-
-  addImageCard(pdf, context.layoutImage, MARGIN, 103, 182, 95, "Roof, panel, and map layout");
-
-  const stats = calculateArrayStats(context.panels);
-  drawMetricCard(pdf, MARGIN, 215, 42, "System size", `${stats.totalKwp.toFixed(2)} kWp`);
-  drawMetricCard(pdf, 60, 215, 42, "Modules", String(context.panels.length));
-  drawMetricCard(pdf, 106, 215, 42, "Annual energy", `${context.energy.year.totalEnergyKwh.toLocaleString()} kWh`);
-  drawMetricCard(pdf, 152, 215, 42, "Annual savings", formatCurrency(context.energy.year.estimatedRevenue));
-
-  drawSectionTitle(pdf, MARGIN, 250, "Executive Summary");
-  const source = context.energy.year.dataSource === "solar-api" ? "Google Solar annual flux data" : "manual irradiance assumptions";
-  paragraph(
-    pdf,
-    `This report summarizes the proposed rooftop solar layout, roof geometry, annual solar exposure, expected energy production, and financial estimate. Calculations use ${source}, panel capacity, roof placement, and a 95% temperature performance factor.`,
-    MARGIN,
-    259,
-    182,
-    4.8
-  );
-  drawFooter(pdf, 1);
+  pdf.addImage(context.coverImage, imageFormat(context.coverImage), 0, 0, PAGE_W, PAGE_H, undefined, "FAST");
 }
 
 function drawSitePage(pdf: jsPDF, context: ReportContext) {
-  addImageCard(pdf, context.mapImage, MARGIN, 35, 182, 118, "Site map");
-  drawSectionTitle(pdf, MARGIN, 170, "Site Information");
-  drawTwoColumnTable(pdf, MARGIN, 181, [
+  addImageCard(pdf, context.mapImage, MARGIN, 34, 182, 118, "Satellite context");
+  drawSectionTitle(pdf, MARGIN, 170, "Project Location");
+  drawTwoColumnTable(pdf, MARGIN, 182, [
     ["Customer", context.document.customerName || "-"],
     ["Address", context.document.customerAddress || "-"],
-    ["Latitude", context.mapCapture ? context.mapCapture.latitude.toFixed(6) : "-"],
-    ["Longitude", context.mapCapture ? context.mapCapture.longitude.toFixed(6) : "-"],
-    ["Map zoom", context.mapCapture ? String(context.mapCapture.zoom) : "-"],
-    ["Captured area", context.mapCapture ? `${context.mapCapture.widthM.toFixed(1)} m x ${context.mapCapture.heightM.toFixed(1)} m` : "-"]
+    ["Map center", context.mapCapture ? `${context.mapCapture.latitude.toFixed(5)}, ${context.mapCapture.longitude.toFixed(5)}` : "-"],
+    ["Captured area", context.mapCapture ? `${context.mapCapture.widthM.toFixed(0)} x ${context.mapCapture.heightM.toFixed(0)} m` : "-"],
+    ["North reference", `${context.document.site?.northRotation ?? 0} deg`],
+    ["Imagery provider", context.document.site?.imagery?.provider ?? (context.mapCapture ? "google" : "-")]
   ]);
-  drawSectionTitle(pdf, MARGIN, 226, "Site Notes");
-  paragraph(
+  drawNoteBlock(
     pdf,
-    "The map image is used as the base visual reference for roof tracing and panel layout. Roof measurements and panel placement remain based on the CAD drawing scale and project coordinates stored in the document.",
     MARGIN,
-    235,
+    238,
     182,
-    4.8
+    "Site alignment",
+    "A clean map reference helps reviewers understand where the system sits on the property before moving into roof geometry and production assumptions.",
   );
   drawFooter(pdf, 2);
 }
 
 function drawDesignPage(pdf: jsPDF, context: ReportContext) {
-  addImageCard(pdf, context.layoutImage, MARGIN, 35, 182, 118, "Roof with proposed panel layout");
   const stats = calculateArrayStats(context.panels);
-  drawSectionTitle(pdf, MARGIN, 170, "System Overview");
-  drawTwoColumnTable(pdf, MARGIN, 181, [
-    ["Total modules", String(context.panels.length)],
-    ["Panels inside roof", String(context.installedPanels.length)],
-    ["DC capacity", `${stats.totalKwp.toFixed(2)} kWp`],
-    ["Module footprint", `${(stats.width / 1000).toFixed(2)} m x ${(stats.height / 1000).toFixed(2)} m`],
-    ["Roof count", String(context.roofs.length)],
-    ["Total roof area", `${totalRoofArea(context.roofs).toFixed(1)} m2`]
+  addImageCard(pdf, context.layoutImage, MARGIN, 34, 182, 112, "Roof faces and proposed panel layout");
+  drawKpiRow(pdf, MARGIN, 162, [
+    ["DC size", `${stats.totalKwp.toFixed(2)} kWp`],
+    ["Modules", String(context.panels.length)],
+    ["Inside roof", String(context.installedPanels.length)],
+    ["Roof area", `${totalRoofArea(context.roofs).toFixed(1)} m2`]
   ]);
-  drawSectionTitle(pdf, MARGIN, 226, "Roof Summary");
+  drawSectionTitle(pdf, MARGIN, 205, "Roof Summary");
   drawSimpleTable(
     pdf,
     MARGIN,
-    236,
-    ["Roof", "Area", "Azimuth", "Tilt"],
+    216,
+    ["Roof face", "Area", "Usable", "Azimuth", "Pitch"],
     context.roofs.map((roof, index) => [
       roof.name || `Roof ${index + 1}`,
       `${(polygonArea(roof.points) / 1_000_000).toFixed(1)} m2`,
+      `${(polygonAreaPreview(roof) / 1_000_000).toFixed(1)} m2`,
       `${roof.azimuth} deg`,
-      `${roof.tilt} deg`
+      `${roof.pitch ?? roof.tilt} deg`
     ]),
-    [58, 38, 38, 38]
+    [48, 32, 32, 30, 30]
   );
+  drawNoteBlock(pdf, MARGIN, 264, 182, "Design note", `The module footprint is ${(stats.width / 1000).toFixed(2)} m x ${(stats.height / 1000).toFixed(2)} m. Panel placement is reported against roof boundaries and usable setback geometry.`);
   drawFooter(pdf, 3);
 }
 
 function drawExposurePage(pdf: jsPDF, context: ReportContext) {
-  addImageCard(pdf, context.exposureImage, MARGIN, 35, 182, 112, "Annual solar exposure");
-  drawExposureLegend(pdf, MARGIN, 155, context);
-  drawSectionTitle(pdf, MARGIN, 180, "Roof Irradiance Statistics");
+  addImageCard(pdf, context.exposureImage, MARGIN, 34, 182, 112, "Roof-clipped annual solar exposure");
+  drawExposureLegend(pdf, MARGIN, 154, context);
+  pdf.addImage(context.irradianceChart, imageFormat(context.irradianceChart), MARGIN, 178, 86, 50, undefined, "FAST");
+  drawNoteBlock(pdf, 106, 178, 90, "Exposure basis", "Warm colors indicate stronger annual solar flux. When Solar API data is loaded, production is calculated from annual flux sampled under the actual panel footprint.");
+  drawSectionTitle(pdf, MARGIN, 244, "Roof Irradiance Statistics");
   const rows = context.roofs.map((roof, index) => {
     const stats =
       context.solarExposure?.status === "ready" && context.solarExposure.annualFlux && context.solarExposure.transform
@@ -220,28 +199,25 @@ function drawExposurePage(pdf: jsPDF, context: ReportContext) {
       stats ? String(stats.samples) : "-"
     ];
   });
-  drawSimpleTable(pdf, MARGIN, 191, ["Roof", "Average annual flux", "Range", "Samples"], rows, [42, 58, 48, 24]);
-  drawSectionTitle(pdf, MARGIN, 246, "Exposure Method");
-  paragraph(
-    pdf,
-    context.solarExposure?.status === "ready"
-      ? "Annual flux GeoTIFF data from Google Solar API is decoded, georeferenced to the project map, clipped to roof polygons, and sampled inside each roof shape."
-      : "Solar API annual flux has not been loaded for this project. Exposure visuals and calculations fall back to the available CAD layout and default assumptions.",
-    MARGIN,
-    255,
-    182,
-    4.8
-  );
+  drawSimpleTable(pdf, MARGIN, 255, ["Roof", "Average annual flux", "Range", "Samples"], rows, [42, 58, 48, 24]);
   drawFooter(pdf, 4);
 }
 
 function drawEnergyPage(pdf: jsPDF, context: ReportContext) {
-  pdf.addImage(context.productionChart, imageFormat(context.productionChart), MARGIN, 35, 182, 76, undefined, "FAST");
-  drawSectionTitle(pdf, MARGIN, 126, "Production Forecast");
+  pdf.addImage(context.productionChart, imageFormat(context.productionChart), MARGIN, 34, 182, 70, undefined, "FAST");
+  drawKpiRow(pdf, MARGIN, 118, [
+    ["Annual energy", `${context.energy.year.totalEnergyKwh.toLocaleString()} kWh`],
+    ["Daily average", `${context.energy.year.averageDailyGeneration} kWh`],
+    ["Capacity", `${context.energy.year.totalCapacity} kWp`],
+    ["Source", sourceLabel(context.energy.year)]
+  ]);
+  pdf.addImage(context.dailyCurveChart, imageFormat(context.dailyCurveChart), MARGIN, 166, 86, 48, undefined, "FAST");
+  drawNoteBlock(pdf, 106, 166, 90, "Calculation basis", context.energy.year.dataSource === "solar-api" ? "Energy uses panel capacity multiplied by annual Solar API flux sampled under the module footprint, then applies the temperature performance factor." : "Energy uses installed capacity, peak sun hours, temperature factor, and roof azimuth/pitch assumptions.");
+  drawSectionTitle(pdf, MARGIN, 230, "Production Forecast");
   drawSimpleTable(
     pdf,
     MARGIN,
-    137,
+    241,
     ["Period", "Energy", "Savings", "Daily avg", "Source"],
     [
       ["Today", `${context.energy.today.totalEnergyKwh} kWh`, formatCurrency(context.energy.today.estimatedRevenue), `${context.energy.today.averageDailyGeneration} kWh`, sourceLabel(context.energy.today)],
@@ -251,27 +227,21 @@ function drawEnergyPage(pdf: jsPDF, context: ReportContext) {
     ],
     [28, 38, 32, 38, 36]
   );
-  drawSectionTitle(pdf, MARGIN, 204, "Calculation Basis");
-  drawTwoColumnTable(pdf, MARGIN, 215, [
-    ["Total capacity", `${context.energy.year.totalCapacity} kWp`],
-    ["Performance ratio", `${context.energy.year.performanceRatio}%`],
-    ["System efficiency", `${context.energy.year.efficiency}%`],
-    ["Peak generation", `${context.energy.month.peakGeneration} kW`],
-    ["Daily peak sun hours", `${context.energy.year.dailyPeakSunHours} h/day`],
-    ["Annual solar flux", context.energy.year.averageAnnualFlux ? `${context.energy.year.averageAnnualFlux.toLocaleString()} kWh/kW/year` : "Not loaded"]
-  ]);
   drawFooter(pdf, 5);
 }
 
 function drawFinancePage(pdf: jsPDF, context: ReportContext) {
-  pdf.addImage(context.financeChart, imageFormat(context.financeChart), MARGIN, 35, 182, 76, undefined, "FAST");
-  drawSectionTitle(pdf, MARGIN, 128, "Cost And Savings");
-  drawMetricCard(pdf, MARGIN, 140, 42, "System cost", formatCurrency(context.costEstimate.systemCost));
-  drawMetricCard(pdf, 60, 140, 42, "Annual savings", formatCurrency(context.costEstimate.annualSavings));
-  drawMetricCard(pdf, 106, 140, 42, "Payback", context.costEstimate.paybackYears === null ? "N/A" : `${context.costEstimate.paybackYears} yr`);
-  drawMetricCard(pdf, 152, 140, 42, "First year net", formatCurrency(context.costEstimate.firstYearNet));
-  drawSectionTitle(pdf, MARGIN, 178, "Financial Details");
-  drawTwoColumnTable(pdf, MARGIN, 189, [
+  pdf.addImage(context.financeChart, imageFormat(context.financeChart), MARGIN, 34, 182, 70, undefined, "FAST");
+  drawKpiRow(pdf, MARGIN, 118, [
+    ["System cost", formatCurrency(context.costEstimate.systemCost)],
+    ["Annual savings", formatCurrency(context.costEstimate.annualSavings)],
+    ["Payback", context.costEstimate.paybackYears === null ? "N/A" : `${context.costEstimate.paybackYears} yr`],
+    ["First year net", formatCurrency(context.costEstimate.firstYearNet)]
+  ]);
+  pdf.addImage(context.savingsBreakdownChart, imageFormat(context.savingsBreakdownChart), MARGIN, 166, 86, 48, undefined, "FAST");
+  drawNoteBlock(pdf, 106, 166, 90, "Financial note", "Values are planning estimates for comparing cost and savings. Tariffs, incentives, taxes, permitting, and installation conditions should be verified before contract approval.");
+  drawSectionTitle(pdf, MARGIN, 230, "Financial Details");
+  drawTwoColumnTable(pdf, MARGIN, 242, [
     ["Cost per watt", `${formatCurrency(context.costEstimate.costPerWatt)}/W`],
     ["Installed capacity", `${context.energy.year.totalCapacity} kWp`],
     ["Estimated system cost", formatCurrency(context.costEstimate.systemCost)],
@@ -279,15 +249,6 @@ function drawFinancePage(pdf: jsPDF, context: ReportContext) {
     ["Annual savings", formatCurrency(context.energy.year.estimatedRevenue)],
     ["Payback estimate", context.costEstimate.paybackYears === null ? "N/A" : `${context.costEstimate.paybackYears} years`]
   ]);
-  drawSectionTitle(pdf, MARGIN, 238, "Assumptions");
-  paragraph(
-    pdf,
-    "Financial values are estimates for proposal comparison. Actual pricing, incentives, utility tariffs, taxes, permitting, interconnection costs, degradation, and site-specific installation conditions should be verified before contract approval.",
-    MARGIN,
-    247,
-    182,
-    4.8
-  );
   drawFooter(pdf, 6);
 }
 
@@ -338,21 +299,17 @@ function addPage(pdf: jsPDF, pageNumber: number, title: string) {
 }
 
 function drawHeader(pdf: jsPDF, title: string) {
-  pdf.setFillColor(22, 133, 95);
-  pdf.rect(0, 0, PAGE_W, 18, "F");
+  pdf.setFillColor(255, 255, 255);
+  pdf.rect(0, 0, PAGE_W, 22, "F");
+  pdf.setDrawColor(217, 226, 231);
+  pdf.line(MARGIN, 22, PAGE_W - MARGIN, 22);
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(10);
-  pdf.setTextColor(255, 255, 255);
+  pdf.setFontSize(9);
+  pdf.setTextColor(22, 133, 95);
   pdf.text("RufsunCAD", MARGIN, 12);
   pdf.setFont("helvetica", "normal");
+  pdf.setTextColor(71, 85, 105);
   pdf.text(title, PAGE_W - MARGIN, 12, { align: "right" });
-}
-
-function drawFullBleedHeader(pdf: jsPDF) {
-  pdf.setFillColor(22, 133, 95);
-  pdf.rect(0, 0, PAGE_W, 52, "F");
-  pdf.setFillColor(242, 140, 40);
-  pdf.rect(0, 50, PAGE_W, 2, "F");
 }
 
 function drawFooter(pdf: jsPDF, pageNumber: number) {
@@ -367,26 +324,47 @@ function drawFooter(pdf: jsPDF, pageNumber: number) {
 
 function drawSectionTitle(pdf: jsPDF, x: number, y: number, title: string) {
   pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
+  pdf.setFontSize(10);
   pdf.setTextColor(22, 33, 43);
   pdf.text(title, x, y);
   pdf.setDrawColor(22, 133, 95);
-  pdf.setLineWidth(0.6);
-  pdf.line(x, y + 3, x + 22, y + 3);
+  pdf.setLineWidth(0.45);
+  pdf.line(x, y + 3, x + 18, y + 3);
 }
 
-function drawMetricCard(pdf: jsPDF, x: number, y: number, width: number, label: string, value: string) {
-  pdf.setFillColor(247, 250, 249);
-  pdf.setDrawColor(217, 226, 231);
-  pdf.roundedRect(x, y, width, 22, 2, 2, "FD");
+function drawKpiRow(pdf: jsPDF, x: number, y: number, items: Array<[string, string]>) {
+  const gap = 4;
+  const width = (182 - gap * (items.length - 1)) / items.length;
+  items.forEach(([label, value], index) => {
+    const left = x + index * (width + gap);
+    pdf.setFillColor(255, 255, 255);
+    pdf.setDrawColor(217, 226, 231);
+    pdf.roundedRect(left, y, width, 28, 2, 2, "FD");
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(6.8);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(label, left + 4, y + 8);
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(value.length > 16 ? 9 : 11);
+    pdf.setTextColor(23, 33, 43);
+    pdf.text(fitText(value, value.length > 16 ? 18 : 14), left + 4, y + 20);
+  });
+}
+
+function drawNoteBlock(pdf: jsPDF, x: number, y: number, width: number, title: string, body: string) {
+  const bodyLines = pdf.splitTextToSize(body, width - 10) as string[];
+  const height = Math.max(26, 15 + bodyLines.length * 3.8);
+  pdf.setFillColor(248, 250, 252);
+  pdf.setDrawColor(226, 232, 240);
+  pdf.roundedRect(x, y, width, height, 2, 2, "FD");
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(22, 33, 43);
+  pdf.text(title, x + 5, y + 7);
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(7);
-  pdf.setTextColor(100, 116, 139);
-  pdf.text(label, x + 4, y + 7);
-  pdf.setFont("helvetica", "bold");
-  pdf.setFontSize(11);
-  pdf.setTextColor(23, 33, 43);
-  pdf.text(fitText(value, 18), x + 4, y + 16);
+  pdf.setTextColor(71, 85, 105);
+  bodyLines.forEach((line, index) => pdf.text(line, x + 5, y + 14 + index * 3.8));
 }
 
 function addImageCard(pdf: jsPDF, image: string, x: number, y: number, width: number, height: number, caption: string) {
@@ -557,6 +535,140 @@ function createLayoutPlaceholder(document: RufsunCadDocument) {
       }
     }
   });
+}
+
+async function createCoverImage(document: RufsunCadDocument, backgroundImage: string) {
+  const image = await loadHtmlImage(backgroundImage);
+  return createCanvasImage(1200, 1697, (context, width, height) => {
+    const imageRatio = image.naturalWidth / image.naturalHeight;
+    const canvasRatio = width / height;
+    let sourceX = 0;
+    let sourceY = 0;
+    let sourceW = image.naturalWidth;
+    let sourceH = image.naturalHeight;
+
+    if (imageRatio > canvasRatio) {
+      sourceW = image.naturalHeight * canvasRatio;
+      sourceX = (image.naturalWidth - sourceW) / 2;
+    } else {
+      sourceH = image.naturalWidth / canvasRatio;
+      sourceY = (image.naturalHeight - sourceH) / 2;
+    }
+
+    context.drawImage(image, sourceX, sourceY, sourceW, sourceH, 0, 0, width, height);
+
+    const shade = context.createLinearGradient(0, 0, 0, height);
+    shade.addColorStop(0, "rgba(7, 17, 31, 0.68)");
+    shade.addColorStop(0.45, "rgba(7, 17, 31, 0.24)");
+    shade.addColorStop(1, "rgba(7, 17, 31, 0.74)");
+    context.fillStyle = shade;
+    context.fillRect(0, 0, width, height);
+
+    context.fillStyle = "#ffffff";
+    context.font = "700 34px Poppins, Arial, sans-serif";
+    context.fillText("Rufsun Solar CAD", 84, 112);
+
+    context.font = "700 92px Poppins, Arial, sans-serif";
+    context.textAlign = "center";
+    context.fillText("Solar Made,", width / 2, 794);
+    context.fillText("Easy.", width / 2, 902);
+
+    context.textAlign = "left";
+    context.font = "600 36px Poppins, Arial, sans-serif";
+    context.fillText(document.customerName || "Customer", 84, height - 104);
+  });
+}
+
+function createCoverFallbackImage() {
+  return createCanvasImage(1200, 1697, (context, width, height) => {
+    const gradient = context.createLinearGradient(0, 0, width, height);
+    gradient.addColorStop(0, "#17212b");
+    gradient.addColorStop(1, "#16855f");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
+  });
+}
+
+function createDailyCurveChart(energy: ReportContext["energy"]) {
+  const total = Math.max(0, energy.year.averageDailyGeneration);
+  const points = Array.from({ length: 13 }, (_, index) => {
+    const hour = 6 + index;
+    const daylightPosition = index / 12;
+    const curve = Math.sin(Math.PI * daylightPosition);
+    return {
+      label: `${hour}:00`,
+      value: Number((total * curve * 0.18).toFixed(2))
+    };
+  });
+  return createCanvasImage(900, 520, (context, width, height) => {
+    fillBackground(context, width, height);
+    context.fillStyle = INK;
+    context.font = "700 25px Poppins, Arial";
+    context.fillText("Daily Generation Curve", 36, 52);
+    context.fillStyle = MUTED;
+    context.font = "16px Poppins, Arial";
+    context.fillText("Typical clear-day shape from sunrise to evening output.", 36, 80);
+    drawLineChart(context, points, {
+      x: 72,
+      y: 118,
+      width: width - 124,
+      height: height - 192,
+      lineColor: ORANGE,
+      fillColor: "rgba(242, 140, 40, 0.10)",
+      valueSuffix: " kWh"
+    });
+  });
+}
+
+function createIrradianceChart(roofs: RoofObject[], solarExposure?: ProjectSolarDataState) {
+  const data = roofs.map((roof, index) => {
+    const stats =
+      solarExposure?.status === "ready" && solarExposure.annualFlux && solarExposure.transform
+        ? getRoofFluxStatistics(roof, solarExposure.annualFlux, solarExposure.transform)
+        : null;
+    return {
+      label: roof.name || `R${index + 1}`,
+      value: stats?.average ?? 0
+    };
+  });
+  return createCanvasImage(900, 520, (context, width, height) => {
+    fillBackground(context, width, height);
+    context.fillStyle = INK;
+    context.font = "700 25px Poppins, Arial";
+    context.fillText("Roof Irradiance", 36, 52);
+    context.fillStyle = MUTED;
+    context.font = "16px Poppins, Arial";
+    context.fillText(solarExposure?.status === "ready" ? "Average annual flux by roof face." : "Load Solar API data to populate measured flux.", 36, 80);
+    drawBarChart(context, data.length ? data : [{ label: "No data", value: 0 }], 62, 122, width - 118, height - 180, GREEN);
+  });
+}
+
+function createSavingsBreakdownChart(cost: ReportContext["costEstimate"], energy: ReportContext["energy"]) {
+  const annualSavings = Math.max(0, cost.annualSavings);
+  const systemCost = Math.max(1, cost.systemCost);
+  const recoveredPercent = Math.min(100, (annualSavings / systemCost) * 100);
+  return createCanvasImage(760, 640, (context, width, height) => {
+    fillBackground(context, width, height);
+    context.fillStyle = INK;
+    context.font = "700 25px Poppins, Arial";
+    context.fillText("Savings Snapshot", 36, 56);
+    drawDonut(context, 190, 316, 108, 34, recoveredPercent, ORANGE, "#e8edf1");
+    context.fillStyle = INK;
+    context.font = "700 38px Poppins, Arial";
+    context.textAlign = "center";
+    context.fillText(`${Math.round(recoveredPercent)}%`, 190, 326);
+    context.font = "500 16px Poppins, Arial";
+    context.fillStyle = MUTED;
+    context.fillText("cost recovered in year 1", 190, 356);
+    context.textAlign = "left";
+    drawChartStat(context, 366, 196, "Annual savings", formatCurrency(annualSavings));
+    drawChartStat(context, 366, 310, "Monthly savings", formatCurrency(energy.month.estimatedRevenue));
+    drawChartStat(context, 366, 424, "System cost", formatCurrency(systemCost));
+  });
+}
+
+function polygonAreaPreview(roof: RoofObject) {
+  return polygonArea(roofUsablePolygon(roof));
 }
 
 async function createExposureImage(
@@ -755,7 +867,7 @@ function createProductionChart(energy: ReportContext["energy"]) {
   return createCanvasImage(CHART_W, CHART_H, (context, width, height) => {
     fillBackground(context, width, height);
     context.fillStyle = DARK;
-    context.font = "bold 28px Arial";
+    context.font = "700 24px Poppins, Arial";
     context.fillText("Monthly Production Trend", 34, 50);
     drawLineChart(context, data, {
       x: 58,
@@ -763,7 +875,7 @@ function createProductionChart(energy: ReportContext["energy"]) {
       width: width - 94,
       height: height - 132,
       lineColor: GREEN,
-      fillColor: "rgba(22, 133, 95, 0.16)",
+      fillColor: "rgba(22, 133, 95, 0.10)",
       valueSuffix: " kWh"
     });
   });
@@ -778,7 +890,7 @@ function createFinanceChart(cost: ReportContext["costEstimate"]) {
   return createCanvasImage(CHART_W, CHART_H, (context, width, height) => {
     fillBackground(context, width, height);
     context.fillStyle = DARK;
-    context.font = "bold 28px Arial";
+    context.font = "700 24px Poppins, Arial";
     context.fillText("Cumulative Cash Flow", 34, 50);
     drawLineChart(context, data, {
       x: 58,
@@ -786,12 +898,12 @@ function createFinanceChart(cost: ReportContext["costEstimate"]) {
       width: width - 94,
       height: height - 132,
       lineColor: cost.paybackYears === null ? "#315b8f" : GREEN,
-      fillColor: "rgba(49, 91, 143, 0.14)",
+      fillColor: "rgba(49, 91, 143, 0.09)",
       valuePrefix: `${CURRENCY_CODE} `
     });
     if (cost.paybackYears !== null) {
       context.fillStyle = GREEN;
-      context.font = "bold 18px Arial";
+      context.font = "700 16px Poppins, Arial";
       context.fillText(`Estimated payback: ${cost.paybackYears} years`, 58, height - 34);
     }
   });
@@ -862,9 +974,9 @@ function drawLineChart(
 
   context.save();
   context.strokeStyle = LINE;
-  context.lineWidth = 2;
+  context.lineWidth = 1.5;
   context.fillStyle = MUTED;
-  context.font = "15px Arial";
+  context.font = "13px Poppins, Arial";
   for (let i = 0; i <= 4; i += 1) {
     const value = minValue + (range * i) / 4;
     const y = yFor(value);
@@ -877,7 +989,7 @@ function drawLineChart(
 
   const zeroY = yFor(0);
   context.strokeStyle = "#9fb3bf";
-  context.lineWidth = 3;
+  context.lineWidth = 1.8;
   context.beginPath();
   context.moveTo(options.x, zeroY);
   context.lineTo(options.x + options.width, zeroY);
@@ -904,7 +1016,7 @@ function drawLineChart(
     else context.lineTo(x, y);
   });
   context.strokeStyle = options.lineColor;
-  context.lineWidth = 5;
+  context.lineWidth = 3.2;
   context.stroke();
 
   data.forEach((item, index) => {
@@ -912,14 +1024,14 @@ function drawLineChart(
     const y = yFor(item.value);
     context.fillStyle = "#ffffff";
     context.beginPath();
-    context.arc(x, y, 6, 0, Math.PI * 2);
+    context.arc(x, y, 4, 0, Math.PI * 2);
     context.fill();
     context.strokeStyle = options.lineColor;
-    context.lineWidth = 4;
+    context.lineWidth = 2.2;
     context.stroke();
     if (index === 0 || index === data.length - 1 || index % 2 === 1) {
       context.fillStyle = DARK;
-      context.font = "15px Arial";
+      context.font = "13px Poppins, Arial";
       context.fillText(item.label, x - 14, options.y + options.height + 28);
     }
   });
@@ -929,10 +1041,111 @@ function drawLineChart(
     const x = xFor(data.length - 1);
     const y = yFor(last.value);
     context.fillStyle = DARK;
-    context.font = "bold 20px Arial";
+    context.font = "700 16px Poppins, Arial";
     context.fillText(formatChartValue(last.value, options), Math.min(x - 120, options.x + options.width - 155), Math.max(options.y + 22, y - 16));
   }
   context.restore();
+}
+
+function drawBarChart(
+  context: CanvasRenderingContext2D,
+  data: Array<{ label: string; value: number }>,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  color: string
+) {
+  const maxValue = Math.max(1, ...data.map((item) => item.value));
+  const gap = 18;
+  const barWidth = Math.max(24, (width - gap * (data.length - 1)) / data.length);
+  context.save();
+  context.strokeStyle = "#edf2f7";
+  context.lineWidth = 1.5;
+  context.fillStyle = MUTED;
+  context.font = "15px Poppins, Arial";
+  for (let i = 0; i <= 4; i += 1) {
+    const guideY = y + height - (height * i) / 4;
+    context.beginPath();
+    context.moveTo(x, guideY);
+    context.lineTo(x + width, guideY);
+    context.stroke();
+  }
+  data.forEach((item, index) => {
+    const barX = x + index * (barWidth + gap);
+    const barHeight = (item.value / maxValue) * height;
+    const barY = y + height - barHeight;
+    context.fillStyle = color;
+    roundRect(context, barX, barY, barWidth, barHeight, 6);
+    context.fill();
+    context.fillStyle = INK;
+    context.font = "600 14px Poppins, Arial";
+    context.fillText(Math.round(item.value).toLocaleString("en-IN"), barX, Math.max(y + 18, barY - 12));
+    context.fillStyle = MUTED;
+    context.font = "500 13px Poppins, Arial";
+    context.fillText(fitText(item.label, 8), barX, y + height + 34);
+  });
+  context.restore();
+}
+
+function drawDonut(context: CanvasRenderingContext2D, x: number, y: number, radius: number, thickness: number, percent: number, color: string, background: string) {
+  const start = -Math.PI / 2;
+  const end = start + Math.PI * 2 * (Math.max(0, Math.min(100, percent)) / 100);
+  context.save();
+  context.lineCap = "round";
+  context.strokeStyle = background;
+  context.lineWidth = thickness;
+  context.beginPath();
+  context.arc(x, y, radius, 0, Math.PI * 2);
+  context.stroke();
+  context.strokeStyle = color;
+  context.beginPath();
+  context.arc(x, y, radius, start, end);
+  context.stroke();
+  context.restore();
+}
+
+function drawChartStat(context: CanvasRenderingContext2D, x: number, y: number, label: string, value: string) {
+  context.fillStyle = "#ffffff";
+  roundRect(context, x, y, 236, 78, 8);
+  context.fill();
+  context.strokeStyle = LINE;
+  context.lineWidth = 1.5;
+  context.stroke();
+  context.fillStyle = MUTED;
+  context.font = "600 14px Poppins, Arial";
+  context.fillText(label.toUpperCase(), x + 18, y + 28);
+  context.fillStyle = INK;
+  context.font = value.length > 12 ? "700 24px Poppins, Arial" : "700 30px Poppins, Arial";
+  context.fillText(value, x + 18, y + 60);
+}
+
+function wrapCanvasText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines = 4
+) {
+  const words = String(text || "").split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let current = "";
+  words.forEach((word) => {
+    const next = current ? `${current} ${word}` : word;
+    if (context.measureText(next).width <= maxWidth || !current) {
+      current = next;
+      return;
+    }
+    lines.push(current);
+    current = word;
+  });
+  if (current) lines.push(current);
+  lines.slice(0, maxLines).forEach((line, index) => {
+    const suffix = index === maxLines - 1 && lines.length > maxLines ? "." : "";
+    context.fillText(`${line}${suffix}`, x, y + index * lineHeight);
+  });
 }
 
 function formatChartValue(value: number, options: { valuePrefix?: string; valueSuffix?: string }) {
@@ -958,8 +1171,6 @@ function imageFormat(dataUrl: string): "JPEG" | "PNG" {
 
 function fillBackground(context: CanvasRenderingContext2D, width: number, height: number) {
   context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, width, height);
-  context.fillStyle = PANEL;
   context.fillRect(0, 0, width, height);
 }
 

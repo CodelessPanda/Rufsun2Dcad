@@ -24,8 +24,8 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
 
   const allPanels = document.objects.filter((object): object is SolarPanelObject => object.type === "solarPanel");
   const roofs = document.objects.filter((object): object is RoofObject => object.type === "roof");
-  const panels = filterPanelsOnRoofs(allPanels, roofs);
-  const annualFluxByPanelId = buildPanelAnnualFluxMap(panels, solarExposure);
+  const installedPanels = filterPanelsOnRoofs(allPanels, roofs);
+  const annualFluxByPanelId = buildPanelAnnualFluxMap(installedPanels, solarExposure);
   const annualFluxByRoofId = buildRoofAnnualFluxMap(roofs, solarExposure);
 
   if (allPanels.length === 0) {
@@ -39,13 +39,13 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
     );
   }
 
-  if (panels.length === 0) {
+  if (installedPanels.length === 0) {
     return (
       <aside className="properties-panel analysis-panel">
         <section className="panel-section">
           <h2>Energy Analysis</h2>
           <p className="info-message">
-            Draw a roof and place the solar panels inside it to view energy generation estimates.
+            {allPanels.length} panel{allPanels.length === 1 ? "" : "s"} drawn, but none are fully inside the usable roof area. Move panels inside the roof and setback line to view energy generation estimates.
           </p>
         </section>
       </aside>
@@ -53,7 +53,7 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
   }
 
   const results = calculateAllPeriods({
-    panels,
+    panels: allPanels,
     roofs,
     averageRadiance,
     annualFluxByPanelId,
@@ -71,7 +71,8 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
       <section className="panel-section">
         <h2>Energy Analysis</h2>
         <p className="fine-print">
-          Projections based on {panels.length} installed panel{panels.length === 1 ? "" : "s"} and {current.dataSource === "solar-api" ? "Google Solar annual flux" : "dummy weather data"}.
+          Projections use {current.panelCount} production-ready panel{current.panelCount === 1 ? "" : "s"}
+          {current.panelCount !== allPanels.length ? ` out of ${allPanels.length} total drawn` : ""} and {current.dataSource === "solar-api" ? "Google Solar annual flux" : "dummy weather data"}.
         </p>
       </section>
 
@@ -95,7 +96,8 @@ export function EnergyAnalysisPanel({ solarExposure }: Props) {
       <section className="panel-section">
         <h3>System Overview</h3>
         <Stat icon={<Zap />} label="Total Capacity" value={`${current.totalCapacity} kWp`} />
-        <Stat icon={<Gauge />} label="Panel Count" value={current.panelCount} />
+        <Stat icon={<Gauge />} label="Panel Count" value={allPanels.length} />
+        {current.panelCount !== allPanels.length && <Stat label="Used in Production" value={current.panelCount} />}
         <Stat icon={<TrendingUp />} label="System Efficiency" value={`${current.efficiency}%`} />
         <Stat icon={<Sun />} label="Peak Sun Hours" value={`${current.dailyPeakSunHours} h/day`} />
         {current.averageAnnualFlux && <Stat label="Annual Solar Flux" value={`${current.averageAnnualFlux.toLocaleString()} kWh/kW/year`} />}
