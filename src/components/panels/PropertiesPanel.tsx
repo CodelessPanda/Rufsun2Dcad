@@ -1105,8 +1105,61 @@ function RoofProperties({ object, updateObject }: { object: RoofObject; updateOb
 
 function MultiSelection({ objects }: { objects: CadObject[] }) {
   const selectedIds = useCadStore((state) => state.selectedIds);
+  const pushHistory = useCadStore((state) => state.pushHistory);
+  const updateObject = useCadStore((state) => state.updateObject);
   const stats = selectedSolarStats(objects, selectedIds);
   const allPanels = objects.every((object) => object.type === "solarPanel");
+  const panels = objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
+
+  function applyToAll(patches: { id: string; patch: Partial<CadObject> }[]) {
+    pushHistory();
+    patches.forEach(({ id, patch }) => updateObject(id, patch, false));
+  }
+
+  function alignLeft() {
+    const minX = Math.min(...panels.map((p) => p.x));
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { x: minX } })));
+  }
+  function alignRight() {
+    const maxX = Math.max(...panels.map((p) => p.x + p.width));
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { x: maxX - p.width } })));
+  }
+  function alignCenterH() {
+    const xs = panels.map((p) => p.x + p.width / 2);
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { x: cx - p.width / 2 } })));
+  }
+  function alignTop() {
+    const minY = Math.min(...panels.map((p) => p.y));
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { y: minY } })));
+  }
+  function alignBottom() {
+    const maxY = Math.max(...panels.map((p) => p.y + p.height));
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { y: maxY - p.height } })));
+  }
+  function alignCenterV() {
+    const ys = panels.map((p) => p.y + p.height / 2);
+    const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { y: cy - p.height / 2 } })));
+  }
+  function distributeH() {
+    if (panels.length < 3) return;
+    const sorted = [...panels].sort((a, b) => a.x - b.x);
+    const totalSpan = sorted[sorted.length - 1].x - sorted[0].x;
+    const gap = totalSpan / (sorted.length - 1);
+    applyToAll(sorted.map((p, i) => ({ id: p.id, patch: { x: sorted[0].x + gap * i } })));
+  }
+  function distributeV() {
+    if (panels.length < 3) return;
+    const sorted = [...panels].sort((a, b) => a.y - b.y);
+    const totalSpan = sorted[sorted.length - 1].y - sorted[0].y;
+    const gap = totalSpan / (sorted.length - 1);
+    applyToAll(sorted.map((p, i) => ({ id: p.id, patch: { y: sorted[0].y + gap * i } })));
+  }
+  function rotatePanels(deltaDeg: number) {
+    applyToAll(panels.map((p) => ({ id: p.id, patch: { rotation: ((p.rotation + deltaDeg) % 360 + 360) % 360 } })));
+  }
+
   return (
     <section className="panel-section stats">
       <h2>Selected</h2>
@@ -1117,6 +1170,33 @@ function MultiSelection({ objects }: { objects: CadObject[] }) {
           <Stat label="DC capacity" value={`${stats.totalKwp.toFixed(2)} kWp`} />
           <Stat label="Array width" value={formatMetric(stats.width)} />
           <Stat label="Array height" value={formatMetric(stats.height)} />
+          {panels.length >= 2 && (
+            <div className="align-tools">
+              <p className="align-tools-label">Align</p>
+              <div className="align-row">
+                <button title="Align left edges" onClick={alignLeft}>⬛◻◻ Left</button>
+                <button title="Align centers horizontally" onClick={alignCenterH}>◻⬛◻ CtrH</button>
+                <button title="Align right edges" onClick={alignRight}>◻◻⬛ Right</button>
+              </div>
+              <div className="align-row">
+                <button title="Align top edges" onClick={alignTop}>▀ Top</button>
+                <button title="Align centers vertically" onClick={alignCenterV}>▬ CtrV</button>
+                <button title="Align bottom edges" onClick={alignBottom}>▄ Bottom</button>
+              </div>
+              {panels.length >= 3 && (
+                <div className="align-row">
+                  <button title="Distribute horizontally with equal spacing" onClick={distributeH}>↔ Distrib H</button>
+                  <button title="Distribute vertically with equal spacing" onClick={distributeV}>↕ Distrib V</button>
+                </div>
+              )}
+              <p className="align-tools-label" style={{ marginTop: 6 }}>Rotate all</p>
+              <div className="align-row">
+                <button title="Rotate selection −15°" onClick={() => rotatePanels(-15)}>↺ −15°</button>
+                <button title="Rotate selection +15°" onClick={() => rotatePanels(15)}>↻ +15°</button>
+                <button title="Rotate selection +90°" onClick={() => rotatePanels(90)}>↻ +90°</button>
+              </div>
+            </div>
+          )}
         </>
       )}
     </section>

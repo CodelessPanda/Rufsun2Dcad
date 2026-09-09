@@ -3328,3 +3328,151 @@ button {
   color: #1d4ed8 !important;
   font-weight: 600;
 }
+
+/* ── Empty state cards ─────────────────────────────────────────────────── */
+.empty-state-card {
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 10px;
+  padding: 18px 14px;
+  text-align: center;
+  margin-top: 8px;
+}
+.empty-state-icon { font-size: 28px; display: block; margin-bottom: 8px; }
+.empty-state-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+  margin: 0 0 6px;
+}
+.empty-state-hint {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ── StatusBar undo/redo action buttons ────────────────────────────────── */
+.statusbar-action {
+  background: none;
+  border: none;
+  color: #16855f;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 4px;
+  font-family: inherit;
+  font-weight: 600;
+  transition: color 0.15s;
+}
+.statusbar-action:hover { color: #0d6147; }
+.statusbar-action.disabled,
+.statusbar-action:disabled { color: #94a3b8; cursor: default; }
+
+/* ── Keyboard shortcuts modal ──────────────────────────────────────────── */
+.shortcuts-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.shortcuts-modal {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  width: 560px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.shortcuts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+.shortcuts-header h2 { margin: 0; font-size: 15px; color: #17212b; }
+.shortcuts-close {
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  color: #64748b;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+.shortcuts-close:hover { background: #f1f5f9; color: #1e293b; }
+.shortcuts-body {
+  overflow-y: auto;
+  padding: 16px 20px;
+  column-count: 2;
+  column-gap: 24px;
+}
+.shortcuts-section {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+.shortcuts-section h3 {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #16855f;
+  font-weight: 700;
+  margin: 0 0 6px;
+}
+.shortcuts-section table { width: 100%; border-collapse: collapse; }
+.shortcuts-section tr { border-bottom: 1px solid #f1f5f9; }
+.shortcuts-section td { padding: 3px 0; font-size: 11px; color: #334155; }
+.shortcuts-section td:first-child { padding-right: 8px; }
+kbd {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  color: #1e293b;
+  white-space: nowrap;
+}
+
+/* ── Panel alignment tools ─────────────────────────────────────────────── */
+.align-tools {
+  margin-top: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px;
+}
+.align-tools-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #64748b;
+  font-weight: 700;
+  margin: 0 0 4px;
+}
+.align-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.align-row button {
+  flex: 1;
+  padding: 4px 2px;
+  font-size: 9.5px;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #374151;
+  font-weight: 600;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.align-row button:hover { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; }

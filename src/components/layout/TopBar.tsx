@@ -42,6 +42,7 @@ export function TopBar({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [snapMenuOpen, setSnapMenuOpen] = useState(false);
   const [solarMenuOpen, setSolarMenuOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [, setDropdownLayoutTick] = useState(0);
   const selectedRoof = document.objects.find((object): object is RoofObject => object.type === "roof" && selectedIds.includes(object.id));
   const canLoadSolar = hasEntitlement(commercialAccess, "solar.irradiance");
@@ -117,6 +118,7 @@ export function TopBar({
   };
 
   return (
+  <>
     <header className="topbar">
       <div className="brand">
         <span className="brand-mark">R</span>
@@ -232,17 +234,115 @@ export function TopBar({
             )}
           </div>
         </nav>
+        <button
+          className="designer-projects-btn"
+          onClick={() => setShortcutsOpen(true)}
+          title="Keyboard shortcuts (?)"
+          aria-label="Show keyboard shortcuts"
+        >
+          ? Help
+        </button>
         <button className="designer-projects-btn" onClick={onShowProjects} title="Back to Projects">
           <Home /> Back to Projects
         </button>
       </div>
     </header>
+    {shortcutsOpen && <KeyboardShortcutsModal onClose={() => setShortcutsOpen(false)} />}
+  </>
   );
 }
 
 function hasEntitlement(commercialAccess: CompanyCommercialSummary | null | undefined, key: string) {
   if (!commercialAccess) return true;
   return Boolean(commercialAccess.subscriptionValid && commercialAccess.entitlements[key]?.enabled);
+}
+
+const SHORTCUT_SECTIONS = [
+  {
+    title: "General",
+    rows: [
+      ["Ctrl + Z", "Undo"],
+      ["Ctrl + Y  /  Ctrl + Shift + Z", "Redo"],
+      ["Ctrl + C", "Copy selected"],
+      ["Ctrl + V", "Paste"],
+      ["Ctrl + D", "Duplicate selected"],
+      ["Delete  /  Backspace", "Delete selected"],
+      ["Escape", "Deselect / cancel current tool"],
+    ],
+  },
+  {
+    title: "Navigation",
+    rows: [
+      ["Space + drag", "Pan the canvas"],
+      ["Scroll wheel", "Zoom in / out"],
+      ["Ctrl + 0", "Fit view to content"],
+    ],
+  },
+  {
+    title: "Selection",
+    rows: [
+      ["Click", "Select object"],
+      ["Shift + Click", "Add / remove from selection"],
+      ["Click + drag on empty area", "Marquee (box) select"],
+    ],
+  },
+  {
+    title: "Tools",
+    rows: [
+      ["S", "Select tool"],
+      ["P / H", "Pan tool"],
+      ["R", "Rectangle"],
+      ["C", "Circle"],
+      ["L", "Line"],
+      ["O", "Polygon / Roof"],
+      ["D", "Dimension"],
+      ["T", "Text"],
+      ["W", "Solar panel"],
+    ],
+  },
+  {
+    title: "Snap & Grid",
+    rows: [
+      ["G", "Toggle grid snap on / off"],
+      ["[ / ]", "Decrease / increase grid size"],
+    ],
+  },
+];
+
+function KeyboardShortcutsModal({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="shortcuts-overlay" onPointerDown={onClose}>
+      <div className="shortcuts-modal" onPointerDown={(e) => e.stopPropagation()}>
+        <div className="shortcuts-header">
+          <h2>Keyboard Shortcuts</h2>
+          <button className="shortcuts-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <div className="shortcuts-body">
+          {SHORTCUT_SECTIONS.map((section) => (
+            <div key={section.title} className="shortcuts-section">
+              <h3>{section.title}</h3>
+              <table>
+                <tbody>
+                  {section.rows.map(([key, desc]) => (
+                    <tr key={key}>
+                      <td><kbd>{key}</kbd></td>
+                      <td>{desc}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function dropdownStyle(menuRef: RefObject<HTMLElement>, preferredWidth: number): CSSProperties {

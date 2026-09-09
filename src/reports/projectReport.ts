@@ -4,7 +4,7 @@ import { calculateArrayStats } from "../cad/array/array";
 import { calculateAllPeriods, calculateSystemCostEstimate, filterPanelsOnRoofs, type EnergyGenerationResult } from "../cad/energy/energyCalculator";
 import { DEFAULT_ELECTRICITY_RATE_INR, CURRENCY_CODE, formatCurrency } from "../cad/finance/currency";
 import { distance, findContainingRoof, formatFeetInches, midpoint, polygonArea, roofUsablePolygon } from "../cad/geometry/geometry";
-import { buildPanelAnnualFluxMap, buildRoofAnnualFluxMap } from "../cad/solar/solarAnalysis";
+import { buildPanelAnnualFluxMap, buildRoofAnnualFluxMap, type PanelFluxMap } from "../cad/solar/solarAnalysis";
 import { getRoofFluxStatistics } from "../cad/solar/solarStatistics";
 import { googleStaticMapUrl } from "../services/googleMaps";
 import type { MapCaptureSettings, RoofObject, RufsunCadDocument, SolarPanelObject } from "../types/cad";
@@ -34,6 +34,7 @@ interface ReportContext {
   energy: Record<"today" | "week" | "month" | "year", EnergyGenerationResult>;
   costEstimate: ReturnType<typeof calculateSystemCostEstimate>;
   solarExposure?: ProjectSolarDataState;
+  annualFluxByPanelId?: PanelFluxMap;
 }
 
 const PAGE_W = 210;
@@ -70,9 +71,11 @@ export async function exportProjectReportPdf(params: ExportProjectReportParams) 
   drawExposurePage(pdf, context);
   addPage(pdf, 5, "Energy Production");
   drawEnergyPage(pdf, context);
-  addPage(pdf, 6, "Financial Analysis");
+  addPage(pdf, 6, "Panel Performance");
+  drawPanelPerformancePage(pdf, context);
+  addPage(pdf, 7, "Financial Analysis");
   drawFinancePage(pdf, context);
-  addPage(pdf, 7, "Technical Appendix");
+  addPage(pdf, 8, "Technical Appendix");
   drawAppendixPage(pdf, context);
 
   pdf.save(`${safeFilename(context.document.name)}-solar-report.pdf`);
@@ -123,7 +126,8 @@ async function buildReportContext({ document, stage, solarExposure }: ExportProj
     savingsBreakdownChart,
     energy,
     costEstimate,
-    solarExposure
+    solarExposure,
+    annualFluxByPanelId
   };
 }
 
@@ -230,6 +234,139 @@ function drawEnergyPage(pdf: jsPDF, context: ReportContext) {
   drawFooter(pdf, 5);
 }
 
+function drawPanelPerformancePage(pdf: jsPDF, context: ReportContext) {
+  const electricityRate = DEFAULT_ELECTRICITY_RATE_INR;
+  const { installedPanels, annualFluxByPanelId, energy } = context;
+
+  // Sort panels by position (top→bottom, left→right) for stable numbering
+  const sorted = [...installedPanels].sort((a, b) => {
+    const dy = Math.round((a.y - b.y) / 500);
+    return dy !== 0 ? dy : a.x - b.x;
+  });
+
+  const hasFlux = annualFluxByPanelId && Object.keys(annualFluxByPanelId).length > 0;
+
+  // Panel annual kWh map
+  const kwhMap: Record<string, number> = {};
+  for (const panel of sorted) {
+    const flux = annualFluxByPanelId?.[panel.id]?.flux ?? 0;
+    kwhMap[panel.id] = (panel.wattage / 1000) * flux * 0.95;
+  }
+  const totalAnnualKwh = Object.values(kwhMap).reduce((s, v) => s + v, 0);
+
+  // CO₂
+  const co2AnnualKg = Math.round(energy.year.totalEnergyKwh * 0.82);
+  const co2Lifetime = ((energy.year.totalEnergyKwh * 0.82 * 25) / 1000).toFixed(1);
+
+  // Average flux & relocate threshold
+  const fluxValues = sorted.map(p => annualFluxByPanelId?.[p.id]?.flux ?? 0).filter(v => v > 0);
+  const avgFlux = fluxValues.length ? fluxValues.reduce((s, v) => s + v, 0) / fluxValues.length : 0;
+  const relocateIds = new Set(sorted.filter(p => {
+    const flux = annualFluxByPanelId?.[p.id]?.flux ?? 0;
+    return avgFlux > 0 && flux > 0 && flux < avgFlux * 0.6;
+  }).map(p => p.id));
+
+  let y = 35;
+
+  // ── CO₂ Offset Cards ─────────────────────────────────────────────────────
+  drawSectionTitle(pdf, MARGIN, y, "CO₂ Offset Estimate");
+  y += 12;
+  drawKpiRow(pdf, MARGIN, y, [
+    ["Annual CO₂ offset", `${co2AnnualKg.toLocaleString()} kg`],
+    ["25-year offset", `${co2Lifetime} tonnes`],
+    ["Annual output", `${Math.round(energy.year.totalEnergyKwh).toLocaleString()} kWh`]
+  ]);
+  y += 32;
+
+  // ── Per-Panel Table ───────────────────────────────────────────────────────
+  drawSectionTitle(pdf, MARGIN, y, hasFlux ? "Per-Panel Performance" : "Panel Inventory");
+  y += 10;
+
+  if (!hasFlux) {
+    pdf.setFontSize(9);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text("Solar flux data not loaded. Use Load Solar Data to enable panel-level analysis.", MARGIN, y + 5);
+    pdf.setTextColor(23, 33, 43);
+    y += 18;
+  }
+
+  // Table header
+  const colX = [MARGIN, MARGIN + 14, MARGIN + 44, MARGIN + 74, MARGIN + 104, MARGIN + 134];
+  const headers = ["#", "Flux\n(kWh/kW/yr)", "Output/yr\n(kWh)", "Savings/yr", "Share\n(%)", "Method"];
+
+  pdf.setFillColor(22, 133, 95);
+  pdf.roundedRect(MARGIN, y, 182, 8, 1, 1, "F");
+  pdf.setFontSize(7.5);
+  pdf.setFont("helvetica", "bold");
+  pdf.setTextColor(255, 255, 255);
+  headers.forEach((h, i) => {
+    const lines = h.split("\n");
+    lines.forEach((line, li) => pdf.text(line, colX[i] + 1, y + 3.2 + li * 3));
+  });
+  y += 8;
+
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(7.5);
+
+  const maxRows = Math.min(sorted.length, 28); // ~28 rows fit on one page
+  for (let i = 0; i < maxRows; i++) {
+    const panel = sorted[i];
+    const fluxEntry = annualFluxByPanelId?.[panel.id];
+    const flux = fluxEntry?.flux ?? 0;
+    const annualKwh = kwhMap[panel.id] ?? 0;
+    const savings = annualKwh * electricityRate;
+    const share = totalAnnualKwh > 0 ? ((annualKwh / totalAnnualKwh) * 100).toFixed(1) : "—";
+    const method = fluxEntry?.method ?? "—";
+    const isRelocate = relocateIds.has(panel.id);
+    const rowBg = isRelocate ? [255, 237, 213] : i % 2 === 0 ? [247, 250, 249] : [255, 255, 255];
+
+    pdf.setFillColor(...(rowBg as [number, number, number]));
+    pdf.rect(MARGIN, y, 182, 6, "F");
+
+    pdf.setTextColor(isRelocate ? 194 : 23, isRelocate ? 65 : 33, isRelocate ? 12 : 43);
+    const cells = [
+      `P${i + 1}${isRelocate ? " ⚠" : ""}`,
+      hasFlux ? (flux > 0 ? flux.toLocaleString() : "—") : "—",
+      hasFlux ? (annualKwh > 0 ? Math.round(annualKwh).toLocaleString() : "—") : "—",
+      hasFlux ? (savings > 0 ? formatCurrency(Math.round(savings)) : "—") : "—",
+      hasFlux ? `${share}%` : "—",
+      method
+    ];
+    cells.forEach((cell, ci) => pdf.text(cell, colX[ci] + 1, y + 4));
+    y += 6;
+  }
+
+  if (sorted.length > maxRows) {
+    pdf.setFontSize(8);
+    pdf.setTextColor(100, 116, 139);
+    pdf.text(`+ ${sorted.length - maxRows} more panels — see full breakdown in project file`, MARGIN, y + 5);
+    y += 10;
+  }
+
+  // Thin divider
+  pdf.setDrawColor(217, 226, 231);
+  pdf.setLineWidth(0.3);
+  pdf.line(MARGIN, y + 3, PAGE_W - MARGIN, y + 3);
+  y += 8;
+
+  // ── Relocate advisory ────────────────────────────────────────────────────
+  if (relocateIds.size > 0) {
+    drawSectionTitle(pdf, MARGIN, y, `Relocation Advisory (${relocateIds.size} panel${relocateIds.size > 1 ? "s" : ""})`);
+    y += 9;
+    pdf.setFontSize(8);
+    pdf.setTextColor(194, 65, 12);
+    const names = sorted.filter(p => relocateIds.has(p.id)).map((p, _i) => `P${sorted.indexOf(p) + 1}`).join(", ");
+    pdf.text(`Panels ${names} produce less than 60% of average flux. Consider relocating them to a less shaded area.`, MARGIN, y, { maxWidth: 182 });
+    pdf.setTextColor(23, 33, 43);
+    y += 12;
+  }
+
+  pdf.setTextColor(100, 116, 139);
+  pdf.setFontSize(7.5);
+  pdf.text("CO₂ factor: 0.82 kg/kWh (India CEA 2023 grid emission factor). Panel output uses 95% temperature derating.", MARGIN, PAGE_H - 24, { maxWidth: 182 });
+  drawFooter(pdf, 6);
+}
+
 function drawFinancePage(pdf: jsPDF, context: ReportContext) {
   pdf.addImage(context.financeChart, imageFormat(context.financeChart), MARGIN, 34, 182, 70, undefined, "FAST");
   drawKpiRow(pdf, MARGIN, 118, [
@@ -249,7 +386,16 @@ function drawFinancePage(pdf: jsPDF, context: ReportContext) {
     ["Annual savings", formatCurrency(context.energy.year.estimatedRevenue)],
     ["Payback estimate", context.costEstimate.paybackYears === null ? "N/A" : `${context.costEstimate.paybackYears} years`]
   ]);
-  drawFooter(pdf, 6);
+  drawSectionTitle(pdf, MARGIN, 238, "Assumptions");
+  paragraph(
+    pdf,
+    "Financial values are estimates for proposal comparison. Actual pricing, incentives, utility tariffs, taxes, permitting, interconnection costs, degradation, and site-specific installation conditions should be verified before contract approval.",
+    MARGIN,
+    247,
+    182,
+    4.8
+  );
+  drawFooter(pdf, 7);
 }
 
 function drawAppendixPage(pdf: jsPDF, context: ReportContext) {
@@ -289,7 +435,7 @@ function drawAppendixPage(pdf: jsPDF, context: ReportContext) {
     ["Loaded at", context.solarExposure?.loadedAt || "-"],
     ["Report generated", new Date().toLocaleString()]
   ]);
-  drawFooter(pdf, 7);
+  drawFooter(pdf, 8);
 }
 
 function addPage(pdf: jsPDF, pageNumber: number, title: string) {

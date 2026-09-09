@@ -156,12 +156,31 @@ export function EnergyAnalysisPanel({
   const annualFluxByRoofId = buildRoofAnnualFluxMap(activeRoofs, exposureForSampling);
 
   // ── Empty states ──────────────────────────────────────────────────────────
+  if (roofs.length === 0) {
+    return (
+      <aside className="properties-panel analysis-panel">
+        <section className="panel-section">
+          <h2>Energy Analysis</h2>
+          <div className="empty-state-card">
+            <span className="empty-state-icon">🏠</span>
+            <p className="empty-state-title">No roof drawn yet</p>
+            <p className="empty-state-hint">Use the <strong>Roof</strong> tool in the left toolbar to trace the roof outline. Solar panels must be placed inside a roof to calculate energy output.</p>
+          </div>
+        </section>
+      </aside>
+    );
+  }
+
   if (allPanels.length === 0) {
     return (
       <aside className="properties-panel analysis-panel">
         <section className="panel-section">
           <h2>Energy Analysis</h2>
-          <p className="info-message">Add solar panels to your design to view energy generation estimates.</p>
+          <div className="empty-state-card">
+            <span className="empty-state-icon">☀️</span>
+            <p className="empty-state-title">No panels placed yet</p>
+            <p className="empty-state-hint">Switch to the <strong>Editor</strong> view and use <strong>AutoDesigner</strong> in the Properties panel to fill the roof automatically, or place panels manually with the Solar tool.</p>
+          </div>
         </section>
       </aside>
     );
@@ -172,9 +191,11 @@ export function EnergyAnalysisPanel({
       <aside className="properties-panel analysis-panel">
         <section className="panel-section">
           <h2>Energy Analysis</h2>
-          <p className="info-message">
-            {allPanels.length} panel{allPanels.length === 1 ? "" : "s"} drawn, but none are fully inside the usable roof area. Move panels inside the roof and setback line to view energy generation estimates.
-          </p>
+          <div className="empty-state-card">
+            <span className="empty-state-icon">📐</span>
+            <p className="empty-state-title">Panels are outside all roofs</p>
+            <p className="empty-state-hint">Move the panels so they are inside a roof polygon. Only panels contained within a roof contribute to energy calculations.</p>
+          </div>
         </section>
       </aside>
     );
