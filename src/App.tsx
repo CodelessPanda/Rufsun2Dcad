@@ -35,6 +35,7 @@ import {
   updateSolarDebugLayers
 } from "./services/solarExposureState";
 import { normalizeSolarRegistration } from "./cad/solar/solarGeoTransform";
+import { fitViewportToContent } from "./cad/viewport/viewport";
 import type { MapCaptureSettings, RufsunCadDocument, SolarRegistration } from "./types/cad";
 
 export type ViewMode = "editor" | "energy";
@@ -99,6 +100,7 @@ export function App() {
 
   const document = useCadStore((state) => state.document);
   const setDocument = useCadStore((state) => state.setDocument);
+  const setViewport = useCadStore((state) => state.setViewport);
   const setAutosaveStatus = useCadStore((state) => state.setAutosaveStatus);
   const deleteSelected = useCadStore((state) => state.deleteSelected);
   const copySelected = useCadStore((state) => state.copySelected);
@@ -457,6 +459,19 @@ export function App() {
     setNewProjectOpen(true);
   };
 
+  /** Center the map image (or default view) in the canvas when a project opens. */
+  const fitViewportForDocument = (cadDocument: RufsunCadDocument) => {
+    const mapImg = cadDocument.objects.find((o) => o.type === "mapImage");
+    const screenW = window.innerWidth - 380; // approx canvas width (minus panels)
+    const screenH = window.innerHeight - 88; // approx canvas height (minus bars)
+    if (mapImg && "width" in mapImg && "height" in mapImg) {
+      setViewport(fitViewportToContent(mapImg.x, mapImg.y, mapImg.width, mapImg.height, screenW, screenH));
+    } else {
+      // No map — just fit a reasonable default origin area
+      setViewport(fitViewportToContent(-5000, -5000, 20000, 20000, screenW, screenH));
+    }
+  };
+
   const makeProject = async (input: NewProjectInput) => {
     if (!activeWorkspaceId) return;
     setProjectBusy(true);
@@ -479,6 +494,7 @@ export function App() {
         cloudSavedAt: new Date().toISOString()
       });
       setDocument(cadDocument, false);
+      fitViewportForDocument(cadDocument);
       setActiveProjectId(project.id);
       setSolarExposure({
         status: "idle",
@@ -507,6 +523,7 @@ export function App() {
         return;
       }
       setDocument(parsed.data, false);
+      fitViewportForDocument(parsed.data);
       await cacheCloudProject(activeWorkspaceId, projectId, parsed.data, { cloudSavedAt: cloudDocument.updatedAt });
       setActiveProjectId(projectId);
       setSolarExposure({
@@ -523,6 +540,7 @@ export function App() {
       const localDocument = await loadProject(projectId);
       if (localDocument) {
         setDocument(localDocument, false);
+        fitViewportForDocument(localDocument);
         setActiveProjectId(projectId);
         setSolarExposure({
           status: "idle",

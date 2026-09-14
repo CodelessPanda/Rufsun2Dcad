@@ -1106,14 +1106,14 @@ function RoofProperties({ object, updateObject }: { object: RoofObject; updateOb
 function MultiSelection({ objects }: { objects: CadObject[] }) {
   const selectedIds = useCadStore((state) => state.selectedIds);
   const pushHistory = useCadStore((state) => state.pushHistory);
-  const updateObject = useCadStore((state) => state.updateObject);
+  const batchUpdateObjects = useCadStore((state) => state.batchUpdateObjects);
   const stats = selectedSolarStats(objects, selectedIds);
   const allPanels = objects.every((object) => object.type === "solarPanel");
   const panels = objects.filter((o): o is SolarPanelObject => o.type === "solarPanel");
 
   function applyToAll(patches: { id: string; patch: Partial<CadObject> }[]) {
     pushHistory();
-    patches.forEach(({ id, patch }) => updateObject(id, patch, false));
+    batchUpdateObjects(patches, false);
   }
 
   function alignLeft() {

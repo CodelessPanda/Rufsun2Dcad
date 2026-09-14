@@ -53,6 +53,7 @@ interface CadState {
   clearSelection: () => void;
   addObjects: (objects: CadObject[], selectIds?: string[], subarray?: SubarrayConfig) => void;
   updateObject: (id: string, patch: Partial<CadObject>, recordHistory?: boolean) => void;
+  batchUpdateObjects: (patches: { id: string; patch: Partial<CadObject> }[], recordHistory?: boolean) => void;
   replaceObject: (object: CadObject, recordHistory?: boolean) => void;
   translateObjects: (ids: string[], dx: number, dy: number, recordHistory?: boolean) => void;
   applyDragFromOriginals: (originals: CadObject[], dx: number, dy: number, recordHistory?: boolean) => void;
@@ -175,6 +176,17 @@ export const useCadStore = create<CadState>((set, get) => ({
     set((state) => {
       const nextObjects = state.document.objects.map((object) => {
         if (object.id !== id || !canModify(object, state.document.layers)) return object;
+        return { ...object, ...patch } as CadObject;
+      });
+      const nextDocument = ensureSiteModel({ ...state.document, objects: markPanelRoofWarnings(nextObjects) });
+      return recordHistory ? withHistory(state, nextDocument) : { document: touch(nextDocument) };
+    }),
+  batchUpdateObjects: (patches, recordHistory = true) =>
+    set((state) => {
+      const patchMap = new Map(patches.map(({ id, patch }) => [id, patch]));
+      const nextObjects = state.document.objects.map((object) => {
+        const patch = patchMap.get(object.id);
+        if (!patch || !canModify(object, state.document.layers)) return object;
         return { ...object, ...patch } as CadObject;
       });
       const nextDocument = ensureSiteModel({ ...state.document, objects: markPanelRoofWarnings(nextObjects) });

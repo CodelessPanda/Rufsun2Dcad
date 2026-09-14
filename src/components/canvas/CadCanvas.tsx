@@ -177,10 +177,37 @@ export function CadCanvas({ stageRef, readOnly = false, solarExposure, panelInde
 
   const handleWheel = (event: Konva.KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
+    const { deltaX, deltaY, ctrlKey } = event.evt;
+
+    // Trackpad two-finger pan: no ctrlKey, and either deltaX is non-zero or
+    // deltaY is small (< 50) and non-zoomy. Pinch fires with ctrlKey=true.
+    const isPan = !ctrlKey && (Math.abs(deltaX) > 0 || Math.abs(deltaY) < 50);
+
+    if (isPan) {
+      // Pan viewport — apply instantly without RAF (already fast)
+      const nextViewport = {
+        ...viewportRef.current,
+        x: viewportRef.current.x - deltaX,
+        y: viewportRef.current.y - deltaY
+      };
+      viewportRef.current = nextViewport;
+      stageRef.current?.position({ x: nextViewport.x, y: nextViewport.y });
+      stageRef.current?.batchDraw();
+      // Batch state write with RAF to avoid per-frame Zustand updates
+      if (wheelFrameRef.current === null) {
+        wheelFrameRef.current = requestAnimationFrame(() => {
+          wheelFrameRef.current = null;
+          setViewport({ ...viewportRef.current });
+        });
+      }
+      return;
+    }
+
+    // Zoom (mouse wheel or trackpad pinch with ctrlKey)
     const pointer = getPointer();
     if (!pointer) return;
     const baseViewport = pendingWheelViewportRef.current ?? viewportRef.current;
-    const factor = Math.exp(-event.evt.deltaY * 0.0014);
+    const factor = Math.exp(-deltaY * 0.0014);
     const nextViewport = zoomAroundPoint(baseViewport, pointer, clampScale(baseViewport.scale * factor));
     pendingWheelViewportRef.current = nextViewport;
     viewportRef.current = nextViewport;
