@@ -1183,46 +1183,112 @@ function MultiSelection({ objects }: { objects: CadObject[] }) {
     const gap = totalSpan / (sorted.length - 1);
     applyToAll(sorted.map((p, i) => ({ id: p.id, patch: { y: sorted[0].y + gap * i } })));
   }
+  /**
+   * Groups panels into physical rakes:
+   * - Primary: by subarrayId (auto-layout groups panels per physical rack)
+   * - Fallback: proximity Union-Find for panels with no subarrayId
+   *
+   * Two unassigned panels are "connected" if the gap between their centers
+   * is less than their combined half-diagonals plus 2x their module gap.
+   * This links adjacent panels within the same row/column but separates
+   * panels on different roof sections with a large gap between them.
+   */
+  function groupIntoRakes(panelList: SolarPanelObject[]): SolarPanelObject[][] {
+    if (panelList.length === 0) return [];
+
+    // 1. Split by subarrayId
+    const bySubarray = new Map<string, SolarPanelObject[]>();
+    const unassigned: SolarPanelObject[] = [];
+    for (const panel of panelList) {
+      if (panel.subarrayId) {
+        const group = bySubarray.get(panel.subarrayId) ?? [];
+        group.push(panel);
+        bySubarray.set(panel.subarrayId, group);
+      } else {
+        unassigned.push(panel);
+      }
+    }
+
+    // 2. Proximity Union-Find for panels without subarrayId
+    const proximityRakes: SolarPanelObject[][] = [];
+    if (unassigned.length > 0) {
+      const parent = unassigned.map((_, i) => i);
+      const find = (i: number): number => {
+        if (parent[i] !== i) parent[i] = find(parent[i]);
+        return parent[i];
+      };
+      for (let i = 0; i < unassigned.length; i++) {
+        for (let j = i + 1; j < unassigned.length; j++) {
+          const pi = unassigned[i];
+          const pj = unassigned[j];
+          const ci = panelCenter(pi);
+          const cj = panelCenter(pj);
+          // Center-to-center distance
+          const dist = Math.hypot(ci.x - cj.x, ci.y - cj.y);
+          // "Reach" = circumradius (half-diagonal) + 2x moduleGap
+          const reachI = Math.hypot(pi.width, pi.height) / 2 + pi.moduleGap * 2;
+          const reachJ = Math.hypot(pj.width, pj.height) / 2 + pj.moduleGap * 2;
+          if (dist < reachI + reachJ) {
+            parent[find(i)] = find(j);
+          }
+        }
+      }
+      const groups = new Map<number, SolarPanelObject[]>();
+      unassigned.forEach((panel, i) => {
+        const root = find(i);
+        const group = groups.get(root) ?? [];
+        group.push(panel);
+        groups.set(root, group);
+      });
+      proximityRakes.push(...groups.values());
+    }
+
+    return [...bySubarray.values(), ...proximityRakes];
+  }
+
+  /** Rotates each rake (connected group of panels) around its own centroid independently. */
   function rotatePanels(deltaDeg: number) {
     if (panels.length === 0) return;
-
-    // Compute world-space center of each panel (accounts for current rotation)
-    const centers = panels.map((p) => panelCenter(p));
-
-    // Group centroid = average of all panel centers
-    const cx = centers.reduce((s, c) => s + c.x, 0) / centers.length;
-    const cy = centers.reduce((s, c) => s + c.y, 0) / centers.length;
 
     const rad = (deltaDeg * Math.PI) / 180;
     const cos = Math.cos(rad);
     const sin = Math.sin(rad);
 
-    applyToAll(
-      panels.map((p, i) => {
+    // Detect rakes and rotate each around its own centroid
+    const rakes = groupIntoRakes(panels);
+    const patches: { id: string; patch: Partial<CadObject> }[] = [];
+
+    for (const rake of rakes) {
+      // Rake centroid = average of all panel centers in this rake
+      const centers = rake.map((p) => panelCenter(p));
+      const cx = centers.reduce((s, c) => s + c.x, 0) / centers.length;
+      const cy = centers.reduce((s, c) => s + c.y, 0) / centers.length;
+
+      for (let i = 0; i < rake.length; i++) {
+        const p = rake[i];
         const c = centers[i];
-        // Rotate this panel's center around the group centroid
+        // Rotate this panel's center around the rake's centroid
         const newCx = cx + (c.x - cx) * cos - (c.y - cy) * sin;
         const newCy = cy + (c.x - cx) * sin + (c.y - cy) * cos;
-
-        // New rotation angle (keep in [0, 360))
         const newRotation = ((p.rotation + deltaDeg) % 360 + 360) % 360;
-
-        // Compute new x, y so the panel's top-left pivot maps to newCenter at newRotation
         const rRad = (newRotation * Math.PI) / 180;
         const rCos = Math.cos(rRad);
         const rSin = Math.sin(rRad);
-
-        return {
+        patches.push({
           id: p.id,
           patch: {
             x: Math.round(newCx - (p.width / 2) * rCos + (p.height / 2) * rSin),
             y: Math.round(newCy - (p.width / 2) * rSin - (p.height / 2) * rCos),
             rotation: newRotation
           }
-        };
-      })
-    );
+        });
+      }
+    }
+
+    applyToAll(patches);
   }
+
+  const rakes = panels.length >= 2 ? groupIntoRakes(panels) : [];
 
   return (
     <section className="panel-section stats">
@@ -1253,11 +1319,23 @@ function MultiSelection({ objects }: { objects: CadObject[] }) {
                   <button title="Distribute vertically with equal spacing" onClick={distributeV}>↕ Distrib V</button>
                 </div>
               )}
-              <p className="align-tools-label" style={{ marginTop: 6 }}>Rotate all</p>
+              <p className="align-tools-label" style={{ marginTop: 6 }}>
+                Rotate
+                {rakes.length > 1 && (
+                  <span style={{ fontWeight: 400, opacity: 0.65, marginLeft: 4 }}>
+                    ({rakes.length} separate rakes)
+                  </span>
+                )}
+              </p>
               <div className="align-row">
-                <button title="Rotate selection −15°" onClick={() => rotatePanels(-15)}>↺ −15°</button>
-                <button title="Rotate selection +15°" onClick={() => rotatePanels(15)}>↻ +15°</button>
-                <button title="Rotate selection +90°" onClick={() => rotatePanels(90)}>↻ +90°</button>
+                <button title="Rotate −1°" onClick={() => rotatePanels(-1)}>↺ −1°</button>
+                <button title="Rotate −15°" onClick={() => rotatePanels(-15)}>↺ −15°</button>
+                <button title="Rotate +15°" onClick={() => rotatePanels(15)}>↻ +15°</button>
+                <button title="Rotate +1°" onClick={() => rotatePanels(1)}>↻ +1°</button>
+              </div>
+              <div className="align-row">
+                <button title="Rotate +90°" onClick={() => rotatePanels(90)}>↻ +90°</button>
+                <button title="Rotate 180°" onClick={() => rotatePanels(180)}>↻ 180°</button>
               </div>
             </div>
           )}
