@@ -330,3 +330,41 @@ function pointOnSegment(point: Point, start: Point, end: Point) {
   );
 }
 
+/**
+ * Returns the world-space center of a solar panel, accounting for its rotation.
+ * In Konva, x/y is the pivot (top-left), and rotation is applied around that pivot.
+ * The center in world space = rotate (width/2, height/2) around origin by rotation.
+ */
+export function panelCenter(panel: SolarPanelObject): Point {
+  const rad = (panel.rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: panel.x + (panel.width / 2) * cos - (panel.height / 2) * sin,
+    y: panel.y + (panel.width / 2) * sin + (panel.height / 2) * cos
+  };
+}
+
+/**
+ * Returns a {x, y, rotation} patch that rotates a panel to newRotationDeg
+ * while keeping its visual center stationary in world space.
+ *
+ * Why: panels rotate around their top-left origin (x, y) by default. Adjusting
+ * x/y so the center doesn't move gives the expected "spin in place" behaviour.
+ */
+export function rotatePanelAroundCenter(
+  panel: SolarPanelObject,
+  newRotationDeg: number
+): { x: number; y: number; rotation: number } {
+  const center = panelCenter(panel);
+  const rotation = ((newRotationDeg % 360) + 360) % 360;
+  const rad = (rotation * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  return {
+    x: Math.round(center.x - (panel.width / 2) * cos + (panel.height / 2) * sin),
+    y: Math.round(center.y - (panel.width / 2) * sin - (panel.height / 2) * cos),
+    rotation
+  };
+}
+

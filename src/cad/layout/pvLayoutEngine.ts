@@ -14,7 +14,7 @@ import {
   getBoundingBox,
   polygonArea,
   polygonContainsPolygon,
-  roofUsablePolygon,
+  roofUsablePolygons,
   rotatePoint,
   validatePanelPlacement
 } from "../geometry/geometry";
@@ -48,6 +48,9 @@ export interface GeneratePvLayoutOptions {
   obstructions?: ObstructionObject[];
   restrictedZones?: RestrictedZoneObject[];
   clearanceMm?: number;
+  /** Project latitude (degrees). When provided, used to compute winter-solstice
+   *  sun elevation for accurate inter-row shading buffer. Default: mid-latitude (22°). */
+  latitude?: number;
 }
 
 export interface SubarraySummary {
@@ -122,7 +125,8 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
     zIndexStart = 1,
     existingPanels = [],
     obstructions = [],
-    restrictedZones = []
+    restrictedZones = [],
+    latitude
   } = options;
 
   // 1. Determine module target count limit
@@ -147,26 +151,39 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
     rackTiltDeg: rackingType === "tilted_rack" || rackingType === "ballasted" ? rackTiltDeg : undefined
   };
 
-  // 3. Transform usable roof polygon to local coordinate space aligned with roof azimuth
-  const usableRoofPoints = roofUsablePolygon(roof, clearanceMm);
-  if (usableRoofPoints.length < 3) {
+  // 3. Get ALL usable roof polygons (handles L-shapes, complex setbacks, etc.)
+  const usablePolygons = roofUsablePolygons(roof, clearanceMm);
+  if (usablePolygons.length === 0 || usablePolygons[0].length < 3) {
     return emptyResult(mode, orientation, subarrayConfig, targetRequested);
   }
 
   const roofBox = getBoundingBox(roof);
   const origin = { x: roofBox.x + roofBox.width / 2, y: roofBox.y + roofBox.height / 2 };
-  const localRoofPoints = usableRoofPoints.map((pt) => rotatePoint(pt, origin, -roof.azimuth));
-  const localBounds = boundsFromPoints(localRoofPoints);
+
+  // Rotate ALL usable polygons into local coordinate space aligned with roof azimuth
+  const localPolygons = usablePolygons.map((poly) =>
+    poly.map((pt) => rotatePoint(pt, origin, -roof.azimuth))
+  );
+
+  // Bounding box across ALL local polygons
+  const allLocalPoints = localPolygons.flat();
+  const localBounds = boundsFromPoints(allLocalPoints);
 
   const modWidth = orientation === "portrait" ? module.widthMM : module.heightMM;
   const modHeight = orientation === "portrait" ? module.heightMM : module.widthMM;
 
-  // Row spacing: check if rack tilt row pitch applies
+  // 4. Row pitch — use latitude to compute accurate winter-solstice sun elevation
+  // Formula: elevation = 90° - |latitude| - 23.5° (declination at winter solstice)
+  const minSunElevDeg =
+    typeof latitude === "number"
+      ? Math.max(5, 90 - Math.abs(latitude) - 23.5)
+      : 22; // fallback: mid-latitude Europe
+
   const effectiveRowStep =
     options.rowPitchMm && options.rowPitchMm > modHeight
       ? options.rowPitchMm
       : rackingType === "tilted_rack" && typeof rackTiltDeg === "number" && rackTiltDeg > 0
-      ? calculateRowPitch(modHeight, rackTiltDeg)
+      ? calculateRowPitch(modHeight, rackTiltDeg, minSunElevDeg)
       : modHeight + moduleGap;
 
   const effectiveColStep = modWidth + moduleGap;
@@ -180,7 +197,7 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
     return emptyResult(mode, orientation, subarrayConfig, targetRequested);
   }
 
-  // 4. Calculate Walkway corridor in local space if requested
+  // 5. Calculate Walkway corridor in local space if requested
   const hasWalkway = walkwayWidthMm > 0;
   let walkwayMin = -Infinity;
   let walkwayMax = -Infinity;
@@ -197,7 +214,7 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
     }
   }
 
-  // 5. Generate Candidate Slots
+  // 6. Generate Candidate Slots — check against ALL usable polygons
   const rowLimit = Math.min(200, Math.floor((localBounds.height + effectiveRowStep) / effectiveRowStep) + 2);
   const colLimit = Math.min(200, Math.floor((localBounds.width + effectiveColStep) / effectiveColStep) + 2);
 
@@ -235,7 +252,7 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
         }
       }
 
-      // Check module local footprint containment inside local usable roof
+      // Check module local footprint containment inside ANY usable polygon
       const localFootprint = [
         { x, y },
         { x: x + modWidth, y },
@@ -243,7 +260,8 @@ export function generatePvLayout(options: GeneratePvLayoutOptions): GeneratePvLa
         { x, y: y + modHeight }
       ];
 
-      if (!polygonContainsPolygon(localRoofPoints, localFootprint)) {
+      const fitsInUsableArea = localPolygons.some((poly) => polygonContainsPolygon(poly, localFootprint));
+      if (!fitsInUsableArea) {
         skippedCount += 1;
         continue;
       }

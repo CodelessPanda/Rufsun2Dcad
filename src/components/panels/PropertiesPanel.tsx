@@ -5,7 +5,7 @@ import type { CadObject, RoofEdgeClassification, RoofObject, SolarPanelObject, S
 import { BUILTIN_SOLAR_MODULES, getAllSolarModules, saveCustomModule, findModuleById, type SolarModuleItem, type CellTechnology } from "../../cad/catalog/moduleCatalog";
 import { generatePvLayout, calculateRowPitch, calculateSubarrayStats, type AutoDesignerMode, type LayoutPrioritization } from "../../cad/layout/pvLayoutEngine";
 import { buildSolarArray } from "../../cad/array/array";
-import { formatMetric, polygonArea, distance, angle, validatePanelPlacement, roofUsablePolygon } from "../../cad/geometry/geometry";
+import { formatMetric, polygonArea, distance, angle, validatePanelPlacement, roofUsablePolygon, panelCenter, rotatePanelAroundCenter } from "../../cad/geometry/geometry";
 import { nextZ } from "../../cad/objects/factory";
 import type { CompanyCommercialSummary } from "../../api/types";
 import { DEFAULT_STRUCTURE_ID, calculateSiteSummary, ensureSiteModel, normalizeRoofEdges } from "../../cad/site/siteModel";
@@ -258,7 +258,8 @@ function SolarLayoutTools({
       existingPanels,
       obstructions,
       restrictedZones,
-      clearanceMm: 25.4
+      clearanceMm: 25.4,
+      latitude: document.mapCapture?.latitude
     });
 
     if (result.panels.length > 0) {
@@ -820,7 +821,16 @@ function SingleObject({
       <NumberField label="X" value={object.x} suffix="mm" onCommit={(x) => updateObject(object.id, { x } as Partial<CadObject>)} />
       <NumberField label="Y" value={object.y} suffix="mm" onCommit={(y) => updateObject(object.id, { y } as Partial<CadObject>)} />
       {object.type === "solarPanel" ? (
-        <Stat label="Roof azimuth" value={`${object.rotation} deg`} />
+        <NumberField
+          label="Rotation"
+          value={object.rotation}
+          suffix="deg"
+          onCommit={(newRotation) => {
+            // Rotate around panel center so position doesn't drift
+            const patch = rotatePanelAroundCenter(object, newRotation);
+            updateObject(object.id, patch as Partial<CadObject>);
+          }}
+        />
       ) : (
         <NumberField label="Rotation" value={object.rotation} suffix="deg" onCommit={(rotation) => updateObject(object.id, { rotation } as Partial<CadObject>)} />
       )}
@@ -995,6 +1005,23 @@ function SolarProperties({
         />
       )}
 
+      {/* Shadow-risk warning: row pitch is only valid at the design rotation */}
+      {(() => {
+        const roofs = document.objects.filter((o): o is RoofObject => o.type === "roof");
+        const containingRoof = roofs.find((r) => {
+          // Quick check: panel rotation roughly matches roof azimuth
+          return Math.abs(((object.rotation - r.azimuth + 180 + 360) % 360) - 180) < 45;
+        }) ?? roofs[0];
+        if (!containingRoof) return null;
+        const rotDiff = Math.abs(((object.rotation - containingRoof.azimuth + 180 + 360) % 360) - 180);
+        if (rotDiff <= 10) return null;
+        return (
+          <p className="warning" style={{ marginTop: 6 }}>
+            ⚠ Rotation differs from roof azimuth by {Math.round(rotDiff)}°. Designed row pitch no longer prevents inter-row shading. Re-run Auto Design to recalculate spacing.
+          </p>
+        );
+      })()}
+
       {object.warning && <p className="warning">{object.warning}</p>}
       <div className="array-box">
         <h3>Array Generator</h3>
@@ -1157,7 +1184,44 @@ function MultiSelection({ objects }: { objects: CadObject[] }) {
     applyToAll(sorted.map((p, i) => ({ id: p.id, patch: { y: sorted[0].y + gap * i } })));
   }
   function rotatePanels(deltaDeg: number) {
-    applyToAll(panels.map((p) => ({ id: p.id, patch: { rotation: ((p.rotation + deltaDeg) % 360 + 360) % 360 } })));
+    if (panels.length === 0) return;
+
+    // Compute world-space center of each panel (accounts for current rotation)
+    const centers = panels.map((p) => panelCenter(p));
+
+    // Group centroid = average of all panel centers
+    const cx = centers.reduce((s, c) => s + c.x, 0) / centers.length;
+    const cy = centers.reduce((s, c) => s + c.y, 0) / centers.length;
+
+    const rad = (deltaDeg * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+
+    applyToAll(
+      panels.map((p, i) => {
+        const c = centers[i];
+        // Rotate this panel's center around the group centroid
+        const newCx = cx + (c.x - cx) * cos - (c.y - cy) * sin;
+        const newCy = cy + (c.x - cx) * sin + (c.y - cy) * cos;
+
+        // New rotation angle (keep in [0, 360))
+        const newRotation = ((p.rotation + deltaDeg) % 360 + 360) % 360;
+
+        // Compute new x, y so the panel's top-left pivot maps to newCenter at newRotation
+        const rRad = (newRotation * Math.PI) / 180;
+        const rCos = Math.cos(rRad);
+        const rSin = Math.sin(rRad);
+
+        return {
+          id: p.id,
+          patch: {
+            x: Math.round(newCx - (p.width / 2) * rCos + (p.height / 2) * rSin),
+            y: Math.round(newCy - (p.width / 2) * rSin - (p.height / 2) * rCos),
+            rotation: newRotation
+          }
+        };
+      })
+    );
   }
 
   return (
